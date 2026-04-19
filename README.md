@@ -1,4 +1,4 @@
-# Superlocal-FS (or your chosen name)
+# Superlocal-FS
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![C++](https://img.shields.io/badge/C++-23-blue.svg)](https://isocpp.org/)
