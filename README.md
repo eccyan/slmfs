@@ -1,58 +1,29 @@
-# Superlocal MemoryFS
+# Superlocal-FS (or your chosen name)
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![C++](https://img.shields.io/badge/C++-23-blue.svg)](https://isocpp.org/)
-[![Python](https://img.shields.io/badge/Python-3.10+-yellow.svg)](https://www.python.org/)
 
-**Giving AI memory the laws of physics and geometry.**
+**A High-Performance Implementation of the Superlocal Memory Theory.**
 
-Superlocal MemoryFS is a zero-copy, mathematically rigorous long-term memory engine for autonomous AI agents (like Claude Code). Instead of relying on ad-hoc RAG pipelines, hardcoded forgetting thresholds, or simple cosine similarities, it grounds agent memory in **Information Geometry**, **Algebraic Topology**, and **Stochastic Differential Equations (SDE)**.
+This project provides a zero-copy, system-level implementation of the **Superlocal Memory** framework. It bridges the gap between high-dimensional information geometry and OS-level file systems, enabling autonomous AI agents to manage long-term memory through the laws of physics and topology.
 
-To the AI agent, it looks like a standard, transparent Markdown file system. Under the hood, it's a high-performance C++23 engine running a continuous physical simulation of memory.
+## 📖 Theoretical Origin
 
-## 🌌 The Mathematical Foundations
+This implementation is based on the visionary concepts described at **[superlocalmemory.com](https://www.superlocalmemory.com/)**. 
 
-Conventional LLM memory systems are static and flat. Superlocal introduces three novel layers to make memory self-organizing:
+Our goal is to realize these mathematical foundations—Fisher-Rao metrics, Poincaré disk dynamics, and Sheaf Cohomology—within a production-grade C++23 environment, optimized for low-latency AI agent workflows like Claude Code.
 
-* **Fisher-Rao Retrieval Metric (Information Geometry):** Memories are not points, but probability distributions (diagonal Gaussian families). Retrieval scoring is derived from the Fisher information structure, smoothly transitioning from linear cosine similarity to geodesic distance over the first few accesses.
-* **Sheaf Cohomology for Consistency (Algebraic Topology):** Ad-hoc contradiction checks are replaced with algebraic guarantees. By computing the coboundary operator $\delta$ over the local memory graph (Sheaves), the system mathematically detects logical contradictions ($\delta \neq 0$) and gracefully self-corrects the state.
-* **Riemannian Langevin Lifecycle (Non-Euclidean SDE):** Memory nodes exist on a Poincaré disk. Frequently accessed memories are pulled to the center ($r = 0$). Neglected memories undergo Langevin diffusion, naturally drifting toward the hyperbolic boundary where space compresses. There are no "delete after 30 days" rules—memories simply self-archive through thermodynamic drift.
+## 🌌 Core Pillars
 
-## ⚡ Architecture: The Unix Philosophy Meets High-Performance Computing
+* **Fisher-Rao Retrieval:** Moving beyond flat cosine similarity to a Riemannian manifold of information.
+* **Sheaf Cohomology:** Using algebraic topology to detect and resolve cognitive contradictions ($\delta \neq 0$).
+* **Riemannian Langevin Lifecycle:** A physical simulation of memory drift and forgetting on a Poincaré disk.
 
-Superlocal MemoryFS splits the workload into an offline "Cooker" and a zero-copy "Loader", connected via a lock-free shared memory architecture.
+## ⚡ Engineering Excellence
 
-### 1. Python FUSE Frontend (The I/O & Cooker)
-Intercepts standard file system calls. It parses AI text inputs, generates embedding vectors via local models, and packs them into strictly aligned binary payloads.
-
-### 2. C++23 Backend Engine (The Loader & Simulator)
-A user-space daemon running an independent event loop. It uses `std::span` to achieve **zero-copy deserialization** directly from shared memory. It manages the slab allocator, executes SIMD-optimized vector math, and runs the continuous Langevin physics simulation in the background without blocking the AI's I/O.
-
-## 🛠️ The Agent Experience
-
-AI agents interact with the memory space purely through standard CLI tools (`cat`, `rg`, `echo`).
-
-**The Working Memory**
-```bash
-# The agent reads its current active context (memories near the Poincaré center)
-cat .agent_memory/active.md
-```
-
-**On-Demand Vector Search via Magic Paths**
-```bash
-# The agent searches for a concept.
-# The FUSE layer intercepts the path, vectorizes the query, pulls relevant memories 
-# from the archive back to the center, and streams the result with zero-copy.
-cat .agent_memory/search/AWS_closed_network_deployment.md
-```
-
-**Ingestion and Consistency**
-```bash
-# The agent writes a new memory. 
-# The C++ engine ingests it, computes the Sheaf Cohomology coboundary norm, 
-# and places it at the active center.
-echo "The new proxy IP is 10.0.0.5" >> .agent_memory/active.md
-```
+* **Zero-Copy Architecture:** Leveraging shared memory and C++23 `std::span` to eliminate serialization overhead.
+* **Lock-Free IPC:** SPSC ring buffers and slab allocators for a non-blocking data path between Python (FUSE) and C++ (Engine).
+* **Game Engine DNA:** A three-tier task scheduler designed for consistent high-throughput, prioritizing I/O while amortizing heavy mathematical computations.
 
 ## 🚀 Getting Started
 
