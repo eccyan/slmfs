@@ -185,3 +185,65 @@ TEST(Coboundary, StructuralEdgesWeightedHigher) {
     EXPECT_GT(result_s.norm, result_k.norm)
         << "Structural edges should have higher weight in the norm";
 }
+
+#include <sheaf/annotation.hpp>
+
+// --- Annotation tests ---
+
+TEST(Annotation, FormatBasic) {
+    Annotation ann;
+    ann.superseded_text = "proxy IP is 10.0.0.1";
+    ann.superseding_text = "proxy IP is 10.0.0.5";
+    ann.delta_norm = 0.73f;
+
+    std::string result = format_annotation(ann);
+    EXPECT_EQ(result,
+        "<!-- cohomology: superseded \"proxy IP is 10.0.0.1\" "
+        "by \"proxy IP is 10.0.0.5\", δ-norm=0.73 -->");
+}
+
+TEST(Annotation, FormatHighNorm) {
+    Annotation ann;
+    ann.superseded_text = "old";
+    ann.superseding_text = "new";
+    ann.delta_norm = 1.41421f;
+
+    std::string result = format_annotation(ann);
+    EXPECT_EQ(result,
+        "<!-- cohomology: superseded \"old\" by \"new\", δ-norm=1.41 -->");
+}
+
+TEST(Annotation, FormatZeroNorm) {
+    Annotation ann;
+    ann.superseded_text = "a";
+    ann.superseding_text = "b";
+    ann.delta_norm = 0.0f;
+
+    std::string result = format_annotation(ann);
+    EXPECT_EQ(result,
+        "<!-- cohomology: superseded \"a\" by \"b\", δ-norm=0.00 -->");
+}
+
+TEST(Annotation, FormatLongText) {
+    Annotation ann;
+    ann.superseded_text = "The deployment uses IP address 192.168.1.100 for the proxy server";
+    ann.superseding_text = "The deployment uses IP address 10.0.0.5 for the proxy server";
+    ann.delta_norm = 0.55f;
+
+    std::string result = format_annotation(ann);
+    EXPECT_NE(result.find("192.168.1.100"), std::string::npos);
+    EXPECT_NE(result.find("10.0.0.5"), std::string::npos);
+    EXPECT_EQ(result.substr(0, 5), "<!-- ");
+    EXPECT_EQ(result.substr(result.size() - 4), " -->");
+}
+
+TEST(Annotation, FormatQuotesInText) {
+    Annotation ann;
+    ann.superseded_text = "said \"hello\"";
+    ann.superseding_text = "said \"goodbye\"";
+    ann.delta_norm = 0.5f;
+
+    std::string result = format_annotation(ann);
+    EXPECT_NE(result.find("said \\\"hello\\\""), std::string::npos);
+    EXPECT_NE(result.find("said \\\"goodbye\\\""), std::string::npos);
+}
