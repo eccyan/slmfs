@@ -234,3 +234,93 @@ TEST(FisherRaoDistance, HighDim384) {
     EXPECT_GT(d, 0.0f);
     EXPECT_TRUE(std::isfinite(d));
 }
+
+// --- FisherRaoMetric top_k tests ---
+
+TEST(FisherRaoTopK, ReturnsCorrectCount) {
+    std::vector<float> mu_q = {1.0f, 0.0f};
+    std::vector<float> sigma(2, 1.0f);
+    GaussianNode query{mu_q, sigma, 5};
+
+    std::vector<float> mu0 = {0.0f, 0.0f};
+    std::vector<float> mu1 = {0.5f, 0.0f};
+    std::vector<float> mu2 = {2.0f, 0.0f};
+
+    std::vector<GaussianNode> candidates = {
+        {mu0, sigma, 5},
+        {mu1, sigma, 5},
+        {mu2, sigma, 5},
+    };
+
+    FisherRaoMetric metric;
+    auto result = metric.top_k(query, candidates, 2);
+    EXPECT_EQ(result.size(), 2u);
+}
+
+TEST(FisherRaoTopK, RankedByAscendingDistance) {
+    std::vector<float> mu_q = {1.0f, 0.0f};
+    std::vector<float> sigma(2, 1.0f);
+    GaussianNode query{mu_q, sigma, 5};
+
+    std::vector<float> mu0 = {0.0f, 0.0f};
+    std::vector<float> mu1 = {0.9f, 0.0f};
+    std::vector<float> mu2 = {2.0f, 0.0f};
+
+    std::vector<GaussianNode> candidates = {
+        {mu0, sigma, 5},
+        {mu1, sigma, 5},
+        {mu2, sigma, 5},
+    };
+
+    FisherRaoMetric metric;
+    auto result = metric.top_k(query, candidates, 3);
+    ASSERT_EQ(result.size(), 3u);
+
+    EXPECT_EQ(result[0], 1u);
+
+    float prev_d = 0.0f;
+    for (auto idx : result) {
+        float d = metric.distance(query, candidates[idx]);
+        EXPECT_GE(d + 1e-5f, prev_d);
+        prev_d = d;
+    }
+}
+
+TEST(FisherRaoTopK, KLargerThanCandidates) {
+    std::vector<float> mu_q = {0.0f};
+    std::vector<float> sigma = {1.0f};
+    GaussianNode query{mu_q, sigma, 5};
+
+    std::vector<float> mu0 = {1.0f};
+    std::vector<GaussianNode> candidates = {{mu0, sigma, 5}};
+
+    FisherRaoMetric metric;
+    auto result = metric.top_k(query, candidates, 10);
+    EXPECT_EQ(result.size(), 1u);
+    EXPECT_EQ(result[0], 0u);
+}
+
+TEST(FisherRaoTopK, EmptyCandidates) {
+    std::vector<float> mu_q = {0.0f};
+    std::vector<float> sigma = {1.0f};
+    GaussianNode query{mu_q, sigma, 5};
+
+    std::span<const GaussianNode> empty;
+
+    FisherRaoMetric metric;
+    auto result = metric.top_k(query, empty, 5);
+    EXPECT_TRUE(result.empty());
+}
+
+TEST(FisherRaoTopK, KZero) {
+    std::vector<float> mu_q = {0.0f};
+    std::vector<float> sigma = {1.0f};
+    GaussianNode query{mu_q, sigma, 5};
+
+    std::vector<float> mu0 = {1.0f};
+    std::vector<GaussianNode> candidates = {{mu0, sigma, 5}};
+
+    FisherRaoMetric metric;
+    auto result = metric.top_k(query, candidates, 0);
+    EXPECT_TRUE(result.empty());
+}

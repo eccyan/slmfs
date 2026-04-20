@@ -31,8 +31,37 @@ std::vector<uint32_t> FisherRaoMetric::top_k(
     std::span<const GaussianNode> candidates,
     uint32_t k
 ) const {
-    // Placeholder — implemented in Task 4
-    return {};
+    if (k == 0 || candidates.empty()) {
+        return {};
+    }
+
+    struct IndexDist {
+        uint32_t index;
+        float distance;
+    };
+
+    std::vector<IndexDist> scored;
+    scored.reserve(candidates.size());
+    for (uint32_t i = 0; i < candidates.size(); ++i) {
+        scored.push_back({i, distance(query, candidates[i])});
+    }
+
+    uint32_t actual_k = std::min(k, static_cast<uint32_t>(scored.size()));
+    std::partial_sort(
+        scored.begin(),
+        scored.begin() + actual_k,
+        scored.end(),
+        [](const IndexDist& a, const IndexDist& b) {
+            return a.distance < b.distance;
+        }
+    );
+
+    std::vector<uint32_t> result;
+    result.reserve(actual_k);
+    for (uint32_t i = 0; i < actual_k; ++i) {
+        result.push_back(scored[i].index);
+    }
+    return result;
 }
 
 } // namespace slm::metric
