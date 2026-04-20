@@ -27,6 +27,7 @@ endif()
 add_subdirectory(src/slab)
 add_subdirectory(src/metric)
 add_subdirectory(src/langevin)
+add_subdirectory(src/sheaf)
 
 # Testing
 option(SLM_BUILD_TESTS "Build tests" ON)

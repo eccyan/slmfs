@@ -33,3 +33,14 @@ target_link_libraries(langevin_tests PRIVATE
 )
 
 gtest_discover_tests(langevin_tests)
+
+add_executable(sheaf_tests
+    test_sheaf.cpp
+)
+
+target_link_libraries(sheaf_tests PRIVATE
+    sheaf
+    GTest::gtest_main
+)
+
+gtest_discover_tests(sheaf_tests)
