@@ -14,7 +14,7 @@ struct PersistFixture : public ::testing::Test {
     std::filesystem::path db_path;
 
     void SetUp() override {
-        db_path = std::filesystem::temp_directory_path() / "test_superlocal.db";
+        db_path = std::filesystem::temp_directory_path() / "test_slmfs.db";
         std::filesystem::remove(db_path);
     }
 

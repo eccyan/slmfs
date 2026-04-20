@@ -26,8 +26,8 @@ static void signal_handler(int /*sig*/) {
 }
 
 int main(int argc, char* argv[]) {
-    std::string shm_name = "superlocal_shm";
-    std::filesystem::path db_path = ".superlocal/memory.db";
+    std::string shm_name = "slmfs_shm";
+    std::filesystem::path db_path = ".slmfs/memory.db";
     uint32_t shm_size = 4 * 1024 * 1024;
     uint32_t slab_size = 64 * 1024;
     uint32_t ctrl_size = 4096;
@@ -47,7 +47,7 @@ int main(int argc, char* argv[]) {
 
     uint32_t slab_count = (shm_size - ctrl_size) / slab_size;
 
-    std::cout << "Superlocal Engine starting...\n"
+    std::cout << "SLMFS Engine starting...\n"
               << "  shm_name:   " << shm_name << "\n"
               << "  db_path:    " << db_path << "\n"
               << "  slab_count: " << slab_count << "\n"
