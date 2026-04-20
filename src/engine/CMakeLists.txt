@@ -10,3 +10,10 @@ target_include_directories(engine PUBLIC
 target_link_libraries(engine PUBLIC metric langevin slab sheaf persist)
 
 target_compile_features(engine PUBLIC cxx_std_23)
+
+# Engine binary
+add_executable(memory_engine
+    src/main.cpp
+)
+
+target_link_libraries(memory_engine PRIVATE engine)
