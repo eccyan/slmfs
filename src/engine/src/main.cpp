@@ -47,13 +47,16 @@ int main(int argc, char* argv[]) {
 
     uint32_t slab_count = (shm_size - ctrl_size) / slab_size;
 
+    // POSIX shm names must start with '/' — ensure it
+    std::string shm_path = shm_name.starts_with('/') ? shm_name : "/" + shm_name;
+
     std::cout << "SLMFS Engine starting...\n"
               << "  shm_name:   " << shm_name << "\n"
               << "  db_path:    " << db_path << "\n"
               << "  slab_count: " << slab_count << "\n"
               << "  slab_size:  " << slab_size << "\n";
 
-    int shm_fd = shm_open(shm_name.c_str(), O_CREAT | O_RDWR, 0600);
+    int shm_fd = shm_open(shm_path.c_str(), O_CREAT | O_RDWR, 0666);
     if (shm_fd < 0) {
         std::cerr << "Failed to create shared memory: " << shm_name << "\n";
         return 1;
@@ -62,7 +65,7 @@ int main(int argc, char* argv[]) {
     if (ftruncate(shm_fd, shm_size) < 0) {
         std::cerr << "Failed to resize shared memory\n";
         close(shm_fd);
-        shm_unlink(shm_name.c_str());
+        shm_unlink(shm_path.c_str());
         return 1;
     }
 
@@ -71,7 +74,7 @@ int main(int argc, char* argv[]) {
     if (shm_ptr == MAP_FAILED) {
         std::cerr << "Failed to mmap shared memory\n";
         close(shm_fd);
-        shm_unlink(shm_name.c_str());
+        shm_unlink(shm_path.c_str());
         return 1;
     }
 
@@ -108,7 +111,7 @@ int main(int argc, char* argv[]) {
 
     munmap(shm_ptr, shm_size);
     close(shm_fd);
-    shm_unlink(shm_name.c_str());
+    shm_unlink(shm_path.c_str());
 
     std::cout << "Engine stopped.\n";
     return 0;
