@@ -44,4 +44,20 @@ struct alignas(64) MemoryFSHeader {
 static_assert(sizeof(MemoryFSHeader) == 64, "MemoryFSHeader must be exactly 64 bytes");
 static_assert(alignof(MemoryFSHeader) == 64, "MemoryFSHeader must be 64-byte aligned");
 
+/// Encode a command and slab index into a 32-bit handle.
+/// Upper 8 bits: command type. Lower 24 bits: slab index.
+constexpr uint32_t encode_handle(uint8_t command, uint32_t slab_index) {
+    return (static_cast<uint32_t>(command) << 24) | (slab_index & 0x00FFFFFF);
+}
+
+/// Extract the command type from a 32-bit handle.
+constexpr uint8_t decode_command(uint32_t handle) {
+    return static_cast<uint8_t>(handle >> 24);
+}
+
+/// Extract the slab index from a 32-bit handle.
+constexpr uint32_t decode_slab_index(uint32_t handle) {
+    return handle & 0x00FFFFFF;
+}
+
 } // namespace slm::slab

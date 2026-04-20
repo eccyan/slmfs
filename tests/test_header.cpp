@@ -96,3 +96,38 @@ TEST(ControlBlock, SlabCountAndSize) {
     EXPECT_EQ(cb.slab_count, 63u);
     EXPECT_EQ(cb.slab_size, 65536u);
 }
+
+TEST(HandleEncoding, EncodeWriteCommit) {
+    uint32_t handle = slm::slab::encode_handle(CMD_WRITE_COMMIT, 42);
+    EXPECT_EQ(handle, (0x02u << 24) | 42u);
+}
+
+TEST(HandleEncoding, EncodeRead) {
+    uint32_t handle = slm::slab::encode_handle(CMD_READ, 0);
+    EXPECT_EQ(handle, (0x01u << 24));
+}
+
+TEST(HandleEncoding, DecodeCommand) {
+    uint32_t handle = slm::slab::encode_handle(CMD_WRITE_COMMIT, 100);
+    EXPECT_EQ(slm::slab::decode_command(handle), CMD_WRITE_COMMIT);
+}
+
+TEST(HandleEncoding, DecodeSlabIndex) {
+    uint32_t handle = slm::slab::encode_handle(CMD_READ, 12345);
+    EXPECT_EQ(slm::slab::decode_slab_index(handle), 12345u);
+}
+
+TEST(HandleEncoding, RoundTrip) {
+    for (uint8_t cmd : {CMD_READ, CMD_WRITE_COMMIT}) {
+        for (uint32_t idx : {0u, 1u, 62u, 0x00FFFFFFu}) {
+            uint32_t h = slm::slab::encode_handle(cmd, idx);
+            EXPECT_EQ(slm::slab::decode_command(h), cmd);
+            EXPECT_EQ(slm::slab::decode_slab_index(h), idx);
+        }
+    }
+}
+
+TEST(HandleEncoding, MaxSlabIndex) {
+    uint32_t h = slm::slab::encode_handle(CMD_READ, 0x00FFFFFF);
+    EXPECT_EQ(slm::slab::decode_slab_index(h), 0x00FFFFFFu);
+}
