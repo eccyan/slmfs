@@ -1,7 +1,10 @@
 """FUSE filesystem layer for SLMFS."""
 
 import errno
+import os
+import stat
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -21,19 +24,30 @@ class SlmfsFS(Operations):
         self.embedder = MiniLMEmbedder()
         self.shm = ShmClient(config)
         self._heading_map: dict[int, int] = {}
+        self._uid = os.getuid()
+        self._gid = os.getgid()
+        self._mount_time = time.time()
 
     def destroy(self, path):
         self.shm.close()
 
+    def _base_stat(self, mode, size=0, nlink=1):
+        now = self._mount_time
+        return dict(
+            st_mode=mode, st_nlink=nlink, st_size=size,
+            st_uid=self._uid, st_gid=self._gid,
+            st_atime=now, st_mtime=now, st_ctime=now,
+        )
+
     def getattr(self, path, fh=None):
         if path == "/":
-            return dict(st_mode=0o40755, st_nlink=2)
+            return self._base_stat(stat.S_IFDIR | 0o755, nlink=2)
         if path == "/active.md":
-            return dict(st_mode=0o100644, st_nlink=1, st_size=4096)
+            return self._base_stat(stat.S_IFREG | 0o644, size=4096)
         if path == "/search":
-            return dict(st_mode=0o40555, st_nlink=2)
+            return self._base_stat(stat.S_IFDIR | 0o555, nlink=2)
         if path.startswith("/search/") and path.endswith(".md"):
-            return dict(st_mode=0o100444, st_nlink=1, st_size=4096)
+            return self._base_stat(stat.S_IFREG | 0o444, size=4096)
         raise FuseOSError(errno.ENOENT)
 
     def readdir(self, path, fh):
@@ -42,6 +56,12 @@ class SlmfsFS(Operations):
         if path == "/search":
             return [".", ".."]
         raise FuseOSError(errno.ENOENT)
+
+    def open(self, path, flags):
+        return 0
+
+    def truncate(self, path, length, fh=None):
+        pass
 
     def read(self, path, size, offset, fh):
         if path == "/active.md":
@@ -126,6 +146,9 @@ def main():
         foreground=True,
         nothreads=True,
         allow_other=False,
+        volname="SLMFS",
+        noappledouble=True,
+        noapplexattr=True,
     )
 
 
