@@ -16,12 +16,12 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-// Global jthread pointer for signal handler
-static std::jthread* g_engine_thread = nullptr;
+// Global scheduler pointer for signal handler
+static slm::engine::Scheduler* g_scheduler = nullptr;
 
 static void signal_handler(int /*sig*/) {
-    if (g_engine_thread) {
-        g_engine_thread->request_stop();
+    if (g_scheduler) {
+        g_scheduler->request_stop();
     }
 }
 
@@ -94,13 +94,13 @@ int main(int argc, char* argv[]) {
         slab, slab.cmd_queue(), graph, metric, sheaf, langevin, store, {}
     );
 
+    g_scheduler = &scheduler;
     std::signal(SIGTERM, signal_handler);
     std::signal(SIGINT, signal_handler);
 
-    std::jthread engine_thread([&](std::stop_token token) {
-        scheduler.run(token);
+    std::thread engine_thread([&] {
+        scheduler.run();
     });
-    g_engine_thread = &engine_thread;
 
     std::cout << "Engine running. PID=" << getpid() << "\n";
 

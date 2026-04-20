@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <random>
-#include <stop_token>
+#include <atomic>
 #include <thread>
 #include <engine/memory_graph.hpp>
 #include <metric/fisher_rao.hpp>
@@ -40,7 +40,11 @@ public:
         Config config
     );
 
-    void run(std::stop_token token);
+    /// Main loop — runs until request_stop() is called.
+    void run();
+
+    /// Request cooperative stop (thread-safe).
+    void request_stop() { stop_requested_.store(true, std::memory_order_release); }
 
 private:
     void process_tier1();
@@ -64,6 +68,8 @@ private:
 
     std::deque<uint32_t> cohomology_pending_;
     std::mt19937 rng_{42};
+
+    std::atomic<bool> stop_requested_{false};
 
     std::chrono::steady_clock::time_point last_tier3_tick_;
     std::chrono::steady_clock::time_point last_checkpoint_;

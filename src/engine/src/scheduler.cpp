@@ -26,12 +26,13 @@ double Scheduler::current_time() const {
     return std::chrono::duration<double>(now - start_time_).count();
 }
 
-void Scheduler::run(std::stop_token token) {
+void Scheduler::run() {
+    stop_requested_.store(false, std::memory_order_relaxed);
     start_time_ = std::chrono::steady_clock::now();
     last_tier3_tick_ = start_time_;
     last_checkpoint_ = start_time_;
 
-    while (!token.stop_requested()) {
+    while (!stop_requested_.load(std::memory_order_acquire)) {
         process_tier1();
 
         auto now = std::chrono::steady_clock::now();

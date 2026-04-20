@@ -90,12 +90,10 @@ TEST_F(SchedulerFixture, WriteCommitInsertsNode) {
 
     submit_write("Hello from the agent");
 
-    std::jthread t([&](std::stop_token token) {
-        scheduler.run(token);
-    });
+    std::thread t([&] { scheduler.run(); });
 
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    t.request_stop();
+    scheduler.request_stop();
     t.join();
 
     EXPECT_EQ(graph.size(), 1u);
@@ -117,12 +115,10 @@ TEST_F(SchedulerFixture, MultipleWriteCommits) {
     submit_write("Second memory");
     submit_write("Third memory");
 
-    std::jthread t([&](std::stop_token token) {
-        scheduler.run(token);
-    });
+    std::thread t([&] { scheduler.run(); });
 
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    t.request_stop();
+    scheduler.request_stop();
     t.join();
 
     EXPECT_EQ(graph.size(), 3u);
@@ -134,12 +130,10 @@ TEST_F(SchedulerFixture, WriteCommitWithParentId) {
 
     submit_write("Parent node", 0, 0);
 
-    std::jthread t([&](std::stop_token token) {
-        scheduler.run(token);
-    });
+    std::thread t([&] { scheduler.run(); });
 
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    t.request_stop();
+    scheduler.request_stop();
     t.join();
 
     ASSERT_EQ(graph.size(), 1u);
@@ -147,12 +141,10 @@ TEST_F(SchedulerFixture, WriteCommitWithParentId) {
 
     submit_write("Child node", parent_id, 1);
 
-    std::jthread t2([&](std::stop_token token) {
-        scheduler.run(token);
-    });
+    std::thread t2([&] { scheduler.run(); });
 
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    t2.request_stop();
+    scheduler.request_stop();
     t2.join();
 
     ASSERT_EQ(graph.size(), 2u);
@@ -166,12 +158,10 @@ TEST_F(SchedulerFixture, GracefulShutdownFlushes) {
 
     submit_write("Persisted on shutdown");
 
-    std::jthread t([&](std::stop_token token) {
-        scheduler.run(token);
-    });
+    std::thread t([&] { scheduler.run(); });
 
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    t.request_stop();
+    scheduler.request_stop();
     t.join();
 
     MemoryGraph loaded;
