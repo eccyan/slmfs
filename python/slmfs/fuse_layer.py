@@ -87,6 +87,9 @@ class SlmfsFS(Operations):
         slab_idx = self.shm.acquire_slab()
         if slab_idx is None:
             raise FuseOSError(errno.ENOMEM)
+        # Always clear the slab header to prevent stale DONE_MAGIC
+        # from a previous read causing wait_for_done to return immediately
+        self.shm.write_to_slab(slab_idx, b"\x00" * 64)
         if payload:
             self.shm.write_to_slab(slab_idx, payload)
         handle = (cmd << 24) | slab_idx
