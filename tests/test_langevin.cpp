@@ -79,3 +79,53 @@ TEST(NodeState, DefaultConstruction) {
     EXPECT_DOUBLE_EQ(state.last_access_time, 0.0);
     EXPECT_EQ(state.access_count, 0u);
 }
+
+#include <langevin/sde_stepper.hpp>
+
+// --- LangevinStepper activate tests ---
+
+TEST(LangevinActivate, ResetsToOrigin) {
+    NodeState node{};
+    node.pos = {0.5f, 0.3f};
+    node.last_access_time = 100.0;
+    node.access_count = 3;
+
+    LangevinStepper::activate(node, 200.0);
+
+    EXPECT_FLOAT_EQ(node.pos.x, 0.0f);
+    EXPECT_FLOAT_EQ(node.pos.y, 0.0f);
+    EXPECT_DOUBLE_EQ(node.last_access_time, 200.0);
+    EXPECT_EQ(node.access_count, 4u);
+}
+
+TEST(LangevinActivate, IncrementsAccessCount) {
+    NodeState node{};
+    node.access_count = 0;
+
+    LangevinStepper::activate(node, 1.0);
+    EXPECT_EQ(node.access_count, 1u);
+
+    LangevinStepper::activate(node, 2.0);
+    EXPECT_EQ(node.access_count, 2u);
+}
+
+TEST(LangevinActivate, UpdatesTimestamp) {
+    NodeState node{};
+    node.last_access_time = 50.0;
+
+    LangevinStepper::activate(node, 999.0);
+    EXPECT_DOUBLE_EQ(node.last_access_time, 999.0);
+}
+
+TEST(LangevinConfig, DefaultValues) {
+    LangevinStepper::Config config{};
+    config.dt = 5.0f;
+    config.lambda_decay = 0.01f;
+    config.noise_scale = 0.001f;
+    config.archive_threshold = 0.95f;
+
+    EXPECT_FLOAT_EQ(config.dt, 5.0f);
+    EXPECT_FLOAT_EQ(config.lambda_decay, 0.01f);
+    EXPECT_FLOAT_EQ(config.noise_scale, 0.001f);
+    EXPECT_FLOAT_EQ(config.archive_threshold, 0.95f);
+}
