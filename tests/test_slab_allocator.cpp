@@ -3,6 +3,8 @@
 #include <slab/header.hpp>
 #include <cstring>
 #include <set>
+#include <string>
+#include <vector>
 
 using namespace slm::slab;
 
@@ -145,4 +147,88 @@ TEST_F(TestFixture, CmdQueueAccess) {
     EXPECT_TRUE(queue.try_pop(popped));
     EXPECT_EQ(popped >> 24, CMD_WRITE_COMMIT);
     EXPECT_EQ(popped & 0x00FFFFFF, 3u);
+}
+
+TEST_F(TestFixture, FullPipelineSimulation) {
+    // === Simulate Python FUSE side ===
+
+    // 1. Acquire a slab
+    auto idx = alloc->acquire();
+    ASSERT_TRUE(idx.has_value());
+
+    // 2. Prepare payload
+    const std::string text = "The proxy IP is 10.0.0.5";
+    const std::vector<float> vec = {0.1f, 0.2f, 0.3f, 0.4f};
+
+    uint32_t text_offset = 64;
+    uint32_t text_length = static_cast<uint32_t>(text.size());
+    uint32_t vector_offset = align_up(text_offset + text_length, 64);
+    uint32_t vector_dim = static_cast<uint32_t>(vec.size());
+    uint64_t total_size = vector_offset + vector_dim * sizeof(float);
+
+    // 3. Write into slab via span
+    auto span = alloc->get(*idx);
+    auto* hdr = reinterpret_cast<MemoryFSHeader*>(span.data());
+    *hdr = MemoryFSHeader{};
+    hdr->magic = MEMFS_MAGIC;
+    hdr->command = CMD_WRITE_COMMIT;
+    hdr->total_size = total_size;
+    hdr->text_offset = text_offset;
+    hdr->text_length = text_length;
+    hdr->vector_offset = vector_offset;
+    hdr->vector_dim = vector_dim;
+    hdr->parent_id = 7;
+    hdr->depth = 2;
+
+    std::memcpy(span.data() + text_offset, text.data(), text_length);
+    std::memcpy(span.data() + vector_offset, vec.data(), vec.size() * sizeof(float));
+
+    // 4. Push handle to command queue
+    uint32_t handle = encode_handle(CMD_WRITE_COMMIT, *idx);
+    EXPECT_TRUE(alloc->cmd_queue().try_push(handle));
+
+    // === Simulate C++ Engine side ===
+
+    // 5. Pop handle from command queue
+    uint32_t popped = 0;
+    EXPECT_TRUE(alloc->cmd_queue().try_pop(popped));
+
+    uint8_t cmd = decode_command(popped);
+    uint32_t slab_idx = decode_slab_index(popped);
+    EXPECT_EQ(cmd, CMD_WRITE_COMMIT);
+    EXPECT_EQ(slab_idx, *idx);
+
+    // 6. Zero-copy read from slab
+    const auto& h = alloc->header(slab_idx);
+    EXPECT_EQ(h.magic, MEMFS_MAGIC);
+    EXPECT_EQ(h.command, CMD_WRITE_COMMIT);
+    EXPECT_EQ(h.parent_id, 7u);
+    EXPECT_EQ(h.depth, 2u);
+
+    auto engine_span = alloc->get(slab_idx);
+
+    // Read text (zero-copy)
+    std::string_view txt(
+        reinterpret_cast<const char*>(engine_span.data() + h.text_offset),
+        h.text_length
+    );
+    EXPECT_EQ(txt, "The proxy IP is 10.0.0.5");
+
+    // Read vector (zero-copy) — verify 64-byte alignment
+    EXPECT_EQ(h.vector_offset % 64, 0u);
+    auto* fptr = reinterpret_cast<const float*>(engine_span.data() + h.vector_offset);
+    std::span<const float> vec_view(fptr, h.vector_dim);
+    EXPECT_EQ(vec_view.size(), 4u);
+    EXPECT_FLOAT_EQ(vec_view[0], 0.1f);
+    EXPECT_FLOAT_EQ(vec_view[1], 0.2f);
+    EXPECT_FLOAT_EQ(vec_view[2], 0.3f);
+    EXPECT_FLOAT_EQ(vec_view[3], 0.4f);
+
+    // 7. Release slab
+    alloc->release(slab_idx);
+
+    // 8. Verify slab is reusable
+    auto reacquired = alloc->acquire();
+    ASSERT_TRUE(reacquired.has_value());
+    EXPECT_EQ(*reacquired, slab_idx);
 }
