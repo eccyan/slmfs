@@ -68,3 +68,31 @@ TEST(MemoryFSHeader, VectorOffsetAlignment) {
     EXPECT_EQ(vec_off, 128u);
     EXPECT_EQ(vec_off % 64, 0u);
 }
+
+#include <slab/control_block.hpp>
+
+TEST(ControlBlock, FitsInOnePage) {
+    // ControlBlock must fit within the 4KB control region
+    EXPECT_LE(sizeof(ControlBlock), 4096u);
+}
+
+TEST(ControlBlock, FreeBitmaskInitiallyAllFree) {
+    ControlBlock cb{};
+    cb.init(63);  // 63 slabs
+    // All 63 bits set = all slabs free
+    uint64_t expected = (1ULL << 63) - 1;
+    EXPECT_EQ(cb.free_bitmask.load(), expected);
+}
+
+TEST(ControlBlock, EngineStatusDefault) {
+    ControlBlock cb{};
+    cb.init(63);
+    EXPECT_EQ(cb.engine_status.load(), ControlBlock::STATUS_IDLE);
+}
+
+TEST(ControlBlock, SlabCountAndSize) {
+    ControlBlock cb{};
+    cb.init(63, 65536);
+    EXPECT_EQ(cb.slab_count, 63u);
+    EXPECT_EQ(cb.slab_size, 65536u);
+}
