@@ -1,14 +1,16 @@
-# Superlocal MemoryFS — Architecture Specification
+# SLMFS — Architecture Specification
+
+> **Note:** This document was authored under the original project name "Superlocal MemoryFS". The project has since been renamed to **SLMFS**. Code references (namespaces, binary names, Python package) use the new names. Some prose may still reference "Superlocal" for historical context.
 
 **Date:** 2026-04-20
 **Status:** Approved
-**Version:** 1.0
+**Version:** 1.1
 
 ---
 
 ## 1. Overview
 
-Superlocal MemoryFS is a zero-copy, mathematically rigorous long-term memory engine for autonomous CLI-based AI agents. It presents a transparent Markdown filesystem interface (via FUSE) while running a continuous physical simulation of memory on a non-Euclidean manifold.
+SLMFS (Superlocal Memory FileSystem) is a zero-copy, mathematically rigorous long-term memory engine for autonomous CLI-based AI agents. It presents a transparent Markdown filesystem interface (via FUSE) while running a continuous physical simulation of memory on a non-Euclidean manifold.
 
 **Core philosophy:** No hardcoded forgetting rules. Memory self-organizes through physics (Langevin SDE), retrieval adapts through geometry (Fisher-Rao), and consistency is guaranteed through topology (sheaf cohomology).
 
@@ -60,14 +62,15 @@ Each library is a CMake `STATIC` library with `PUBLIC` include directories. Sing
 ```
 python/
 ├── pyproject.toml
-└── superlocal/
+└── slmfs/
     ├── __init__.py
     ├── config.py          # Runtime configuration (dataclass + TOML)
     ├── embedder.py        # Abstract Embedder + MiniLMEmbedder default
     ├── cooker.py          # Text → binary payload packer
     ├── shm_client.py      # Shared memory + SPSC queue operations
     ├── fuse_layer.py      # FUSE operations (main entry point)
-    └── init.py            # slm init bootstrap script
+    ├── init.py            # slmfs init bootstrap script
+    └── add.py             # Online bulk ingestion
 ```
 
 ### Build System
@@ -531,7 +534,7 @@ Offline migration of legacy Markdown files into the Poincaré memory space. Runs
 ### 8.1 CLI Entry Point
 
 ```
-python -m superlocal.init /path/to/MEMORY.md [/path/to/other.md ...]
+python -m slmfs init /path/to/MEMORY.md [/path/to/other.md ...]
 ```
 
 ### 8.2 Pipeline
@@ -578,14 +581,14 @@ Initial $\sigma = \sigma_{\max}$ for all imported nodes (maximum uncertainty —
 ### 8.5 Startup Sequence
 
 ```
-1. python -m superlocal.init ~/MEMORY.md ~/notes/*.md
-     → parse, embed, place, write to .superlocal/memory.db
+1. python -m slmfs init ~/MEMORY.md ~/notes/*.md
+     → parse, embed, place, write to .slmfs/memory.db
 
-2. systemctl --user start superlocal-engine
+2. systemctl --user start slmfs-engine
      → SqliteStore::load() populates MemoryGraph
      → Langevin SDE + cohomology begin immediately
 
-3. python -m superlocal.fuse_layer
+3. python -m slmfs fuse
      → mounts .agent_memory/
      → agent can cat/echo as normal
 ```
@@ -596,16 +599,16 @@ Initial $\sigma = \sigma_{\max}$ for all imported nodes (maximum uncertainty —
 
 ### 9.1 systemd Unit (Linux / WSL2)
 
-Location: `~/.config/systemd/user/superlocal-engine.service`
+Location: `~/.config/systemd/user/slmfs-engine.service`
 
 ```ini
 [Unit]
-Description=Superlocal Memory C++ Backend Engine
-Before=superlocal-fuse.service
+Description=SLMFS Memory C++ Backend Engine
+Before=slmfs-fuse.service
 
 [Service]
 Type=simple
-ExecStart=/path/to/build/memory_engine
+ExecStart=%h/.local/bin/slmfs_engine --db-path=%h/.slmfs/memory.db --shm-name=slmfs_shm
 Restart=on-failure
 LimitMEMLOCK=infinity
 KillSignal=SIGTERM
