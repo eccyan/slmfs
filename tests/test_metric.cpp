@@ -147,3 +147,90 @@ TEST(SimdOps, NonAlignedDimension) {
     );
     EXPECT_NEAR(result, 140.0f, 1e-3f);
 }
+
+#include <metric/fisher_rao.hpp>
+
+// --- FisherRaoMetric distance tests ---
+
+TEST(FisherRaoDistance, IdenticalNodesZeroDistance) {
+    std::vector<float> mu = {1.0f, 2.0f, 3.0f};
+    std::vector<float> sigma = {1.0f, 1.0f, 1.0f};
+    GaussianNode a{mu, sigma, 5};
+    GaussianNode b{mu, sigma, 5};
+
+    FisherRaoMetric metric;
+    float d = metric.distance(a, b);
+    EXPECT_FLOAT_EQ(d, 0.0f);
+}
+
+TEST(FisherRaoDistance, SymmetricDistance) {
+    std::vector<float> mu_a = {1.0f, 0.0f, 0.0f};
+    std::vector<float> mu_b = {0.0f, 1.0f, 0.0f};
+    std::vector<float> sigma = {1.0f, 1.0f, 1.0f};
+    GaussianNode a{mu_a, sigma, 5};
+    GaussianNode b{mu_b, sigma, 5};
+
+    FisherRaoMetric metric;
+    EXPECT_FLOAT_EQ(metric.distance(a, b), metric.distance(b, a));
+}
+
+TEST(FisherRaoDistance, KnownAnalyticalValue) {
+    // mu_p = [1, 0], mu_q = [0, 0], sigma = SIGMA_MIN for both
+    // Variance term = 0 (identical sigma)
+    // weighted_diff = 1/(0.1*0.1) = 100
+    // d = sqrt(100) = 10
+    std::vector<float> mu_p = {1.0f, 0.0f};
+    std::vector<float> mu_q = {0.0f, 0.0f};
+    std::vector<float> sigma(2, SIGMA_MIN);
+    GaussianNode p{mu_p, sigma, 10};
+    GaussianNode q{mu_q, sigma, 10};
+
+    FisherRaoMetric metric;
+    float d = metric.distance(p, q);
+    float expected_diff = 1.0f / (SIGMA_MIN * SIGMA_MIN);
+    EXPECT_NEAR(d, std::sqrt(expected_diff), 1e-3f);
+}
+
+TEST(FisherRaoDistance, DifferentSigmaAddsVarianceTerm) {
+    std::vector<float> mu = {0.0f};
+    std::vector<float> sigma_p = {1.0f};
+    std::vector<float> sigma_q = {2.0f};
+    GaussianNode p{mu, sigma_p, 10};
+    GaussianNode q{mu, sigma_q, 10};
+
+    FisherRaoMetric metric;
+    float d = metric.distance(p, q);
+    float expected = std::sqrt((2.0f * std::log(2.0f)) * (2.0f * std::log(2.0f)));
+    EXPECT_NEAR(d, expected, 1e-3f);
+}
+
+TEST(FisherRaoDistance, TriangleInequality) {
+    std::vector<float> mu_a = {0.0f, 0.0f};
+    std::vector<float> mu_b = {1.0f, 0.0f};
+    std::vector<float> mu_c = {1.0f, 1.0f};
+    std::vector<float> sigma(2, 1.0f);
+    GaussianNode a{mu_a, sigma, 5};
+    GaussianNode b{mu_b, sigma, 5};
+    GaussianNode c{mu_c, sigma, 5};
+
+    FisherRaoMetric metric;
+    float d_ab = metric.distance(a, b);
+    float d_bc = metric.distance(b, c);
+    float d_ac = metric.distance(a, c);
+    EXPECT_LE(d_ac, d_ab + d_bc + 1e-5f);
+}
+
+TEST(FisherRaoDistance, HighDim384) {
+    constexpr uint32_t dim = 384;
+    std::vector<float> mu_p(dim, 0.0f);
+    std::vector<float> mu_q(dim, 0.0f);
+    mu_q[0] = 1.0f;
+    std::vector<float> sigma(dim, 1.0f);
+    GaussianNode p{mu_p, sigma, 10};
+    GaussianNode q{mu_q, sigma, 10};
+
+    FisherRaoMetric metric;
+    float d = metric.distance(p, q);
+    EXPECT_GT(d, 0.0f);
+    EXPECT_TRUE(std::isfinite(d));
+}
