@@ -4,7 +4,7 @@ Before=slmfs-fuse.service
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/slmfs_engine --db-path=%h/.slmfs/memory.db --shm-name=slmfs_shm
+ExecStart=%h/.local/bin/slmfs_engine --db-path=%h/.slmfs/memory.db --shm-path=%h/.slmfs/ipc_shm.bin
 Restart=on-failure
 LimitMEMLOCK=infinity
 KillSignal=SIGTERM

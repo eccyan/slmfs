@@ -1,4 +1,9 @@
-"""Shared memory client for IPC with the C++ engine.
+"""File-backed mmap client for IPC with the C++ engine.
+
+Uses a regular file (~/.slmfs/ipc_shm.bin) mapped with mmap instead of
+POSIX shared memory (shm_open). This bypasses macOS launchd sandbox
+isolation — file-backed mmap is visible to all processes regardless of
+Mach bootstrap namespace.
 
 Safety model:
 - Single Python producer assumed (FUSE runs with nothreads=True, or slmfs add
@@ -12,11 +17,10 @@ Safety model:
 """
 
 import fcntl
+import mmap
 import os
 import struct
-import tempfile
 import time
-from multiprocessing import shared_memory
 from pathlib import Path
 from typing import Optional
 
@@ -25,7 +29,7 @@ from .cooker import DONE_MAGIC
 
 
 class ShmClient:
-    """Python-side shared memory access: slab allocation + SPSC push.
+    """Python-side file-backed mmap access: slab allocation + SPSC push.
 
     IMPORTANT: Only one Python process should use this at a time.
     Running FUSE and slmfs-add simultaneously against the same shared
@@ -47,10 +51,10 @@ class ShmClient:
     _RING_MASK = _RING_CAPACITY - 1
 
     def __init__(self, config: SlmfsConfig):
+        shm_path = Path(config.shm_path)
+
         # Enforce single-producer: acquire an exclusive file lock.
-        # If another Python producer (FUSE or slmfs-add) is already running
-        # against this shm_name, this will raise immediately.
-        lock_path = Path(tempfile.gettempdir()) / f".slmfs_{config.shm_name}.lock"
+        lock_path = shm_path.with_suffix(".lock")
         self._lock_file = open(lock_path, "w")
         try:
             fcntl.flock(self._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -59,89 +63,87 @@ class ShmClient:
         except OSError:
             self._lock_file.close()
             raise RuntimeError(
-                f"Another SLMFS producer is already connected to '{config.shm_name}'. "
+                f"Another SLMFS producer is already connected to '{shm_path}'. "
                 f"Only one Python producer (FUSE or slmfs-add) may run at a time."
             )
 
-        self._shm = shared_memory.SharedMemory(
-            name=config.shm_name, create=False
-        )
-        self._buf = self._shm.buf
+        # Open the file-backed shared memory region.
+        # The C++ engine creates and truncates this file; we open read-write.
+        if not shm_path.exists():
+            raise FileNotFoundError(
+                f"Shared memory file not found: {shm_path}\n"
+                f"Is the SLMFS engine running? "
+                f"Start it with: slmfs_engine --db-path=~/.slmfs/memory.db"
+            )
+
+        self._fd = os.open(str(shm_path), os.O_RDWR)
+        self._mm = mmap.mmap(self._fd, config.shm_size)
         self._slab_size = config.slab_size
         self._slab_count = config.slab_count
         self._ctrl_size = config.control_block_size
         self._data_offset = config.control_block_size
 
     def close(self):
-        """Release the shared memory mapping and producer lock."""
-        self._shm.close()
+        """Release the mmap, file descriptor, and producer lock."""
+        self._mm.close()
+        os.close(self._fd)
         fcntl.flock(self._lock_file, fcntl.LOCK_UN)
         self._lock_file.close()
 
-    def acquire_slab(self) -> Optional[int]:
-        """Acquire a free slab. Returns slab index or None if pool exhausted.
+    def _read_u64(self, offset: int) -> int:
+        return struct.unpack_from("<Q", self._mm, offset)[0]
 
-        Safety: only one Python process may call this concurrently.
-        The C++ engine never acquires slabs (only releases), so the
-        single-producer load-check-store is race-free.
-        """
-        current = struct.unpack_from("<Q", self._buf, self._BITMASK_OFF)[0]
+    def _write_u64(self, offset: int, value: int):
+        struct.pack_into("<Q", self._mm, offset, value)
+
+    def acquire_slab(self) -> Optional[int]:
+        """Acquire a free slab. Returns slab index or None if pool exhausted."""
+        current = self._read_u64(self._BITMASK_OFF)
         if current == 0:
             return None
 
-        # Find lowest set bit = first free slab
         idx = (current & -current).bit_length() - 1
-
-        # Clear that bit (mark as in-use)
         new_val = current & ~(1 << idx)
-        struct.pack_into("<Q", self._buf, self._BITMASK_OFF, new_val)
+        self._write_u64(self._BITMASK_OFF, new_val)
         return idx
 
     def release_slab(self, index: int):
-        """Return a slab to the free pool.
-
-        Safe for concurrent use: setting a bit is idempotent and the
-        C++ engine sets disjoint bits (for WRITE slabs it released).
-        """
-        current = struct.unpack_from("<Q", self._buf, self._BITMASK_OFF)[0]
+        """Return a slab to the free pool."""
+        current = self._read_u64(self._BITMASK_OFF)
         new_val = current | (1 << index)
-        struct.pack_into("<Q", self._buf, self._BITMASK_OFF, new_val)
+        self._write_u64(self._BITMASK_OFF, new_val)
 
     def write_to_slab(self, index: int, payload: bytes):
         """Copy payload into slab."""
         offset = self._data_offset + index * self._slab_size
-        self._buf[offset : offset + len(payload)] = payload
+        self._mm[offset : offset + len(payload)] = payload
 
     def read_slab(self, index: int, length: int) -> bytes:
         """Read bytes from a slab."""
         offset = self._data_offset + index * self._slab_size
-        return bytes(self._buf[offset : offset + length])
+        return bytes(self._mm[offset : offset + length])
 
     def read_slab_u32(self, index: int, byte_offset: int = 0) -> int:
         """Read a uint32 from a slab at the given byte offset."""
         offset = self._data_offset + index * self._slab_size + byte_offset
-        return struct.unpack_from("<I", self._buf, offset)[0]
+        return struct.unpack_from("<I", self._mm, offset)[0]
 
     def push_handle(self, handle: int) -> bool:
         """Push 32-bit handle to SPSC ring buffer.
 
         Returns False if the ring buffer is full (caller should retry).
-        Matches the C++ SPSC protocol: check tail before advancing head.
         """
-        head = struct.unpack_from("<Q", self._buf, self._RING_HEAD_OFF)[0]
+        head = self._read_u64(self._RING_HEAD_OFF)
         next_head = (head + 1) & self._RING_MASK
 
-        # Check if full: next_head == tail means the ring is full
-        tail = struct.unpack_from("<Q", self._buf, self._RING_TAIL_OFF)[0]
+        tail = self._read_u64(self._RING_TAIL_OFF)
         if next_head == tail:
             return False
 
-        # Write value to buffer[head & mask]
         slot_off = self._RING_BUF_OFF + (head & self._RING_MASK) * 4
-        struct.pack_into("<I", self._buf, slot_off, handle)
+        struct.pack_into("<I", self._mm, slot_off, handle)
 
-        # Release store: increment head
-        struct.pack_into("<Q", self._buf, self._RING_HEAD_OFF, next_head)
+        self._write_u64(self._RING_HEAD_OFF, next_head)
         return True
 
     def push_handle_blocking(

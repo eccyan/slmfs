@@ -145,12 +145,12 @@ def main():
     for arg in sys.argv[1:]:
         if arg.startswith("--mount="):
             config.mount_point = Path(arg.split("=", 1)[1])
-        elif arg.startswith("--shm-name="):
-            config.shm_name = arg.split("=", 1)[1]
+        elif arg.startswith("--shm-path="):
+            config.shm_path = Path(arg.split("=", 1)[1]).expanduser()
 
     config.mount_point.mkdir(parents=True, exist_ok=True)
     print(f"SLMFS mounting at {config.mount_point}")
-    print(f"  shm_name: {config.shm_name}")
+    print(f"  shm_path: {config.shm_path}")
 
     FUSE(
         SlmfsFS(config),

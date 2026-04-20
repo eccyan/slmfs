@@ -8,13 +8,15 @@ from pathlib import Path
 class SlmfsConfig:
     """Configuration for the SLMFS frontend.
 
-    All paths (shm_name, db_path, mount_point) are overridable for
+    All paths (shm_path, db_path, mount_point) are overridable for
     multi-project isolation — each project can run its own independent
     Poincaré disk by specifying unique values.
     """
 
-    # Shared memory
-    shm_name: str = "slmfs_shm"
+    # File-backed shared memory (replaces POSIX shm_open)
+    shm_path: Path = field(
+        default_factory=lambda: Path.home() / ".slmfs" / "ipc_shm.bin"
+    )
     shm_size: int = 4 * 1024 * 1024       # 4MB
     slab_size: int = 64 * 1024             # 64KB
     control_block_size: int = 4096         # 4KB

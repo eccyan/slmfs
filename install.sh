@@ -207,6 +207,7 @@ ok "Engine installed to ${INSTALL_DIR}/slmfs_engine"
 
 REPO_ROOT="$(pwd)"
 DB_PATH="${HOME}/.slmfs/memory.db"
+SHM_PATH="${HOME}/.slmfs/ipc_shm.bin"
 LOG_DIR="${HOME}/.slmfs/logs"
 mkdir -p "$(dirname "$DB_PATH")" "$LOG_DIR"
 
@@ -225,6 +226,7 @@ install_service_macos() {
     # Generate plist with actual paths
     sed -e "s|__SLMFS_ENGINE_PATH__|${INSTALL_DIR}/slmfs_engine|g" \
         -e "s|__SLMFS_DB_PATH__|${DB_PATH}|g" \
+        -e "s|__SLMFS_SHM_PATH__|${SHM_PATH}|g" \
         -e "s|__SLMFS_LOG_DIR__|${LOG_DIR}|g" \
         "$PLIST_SRC" > "$PLIST_DST"
 
@@ -245,6 +247,7 @@ install_service_macos() {
 
         sed -e "s|__SLMFS_PYTHON__|${PYTHON_BIN}|g" \
             -e "s|__SLMFS_MOUNT_POINT__|${MOUNT_POINT}|g" \
+            -e "s|__SLMFS_SHM_PATH__|${SHM_PATH}|g" \
             -e "s|__SLMFS_LOG_DIR__|${LOG_DIR}|g" \
             "$FUSE_PLIST_SRC" > "$FUSE_PLIST_DST"
 

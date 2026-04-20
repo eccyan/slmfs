@@ -4,7 +4,8 @@ from slmfs.config import SlmfsConfig
 
 def test_default_values():
     config = SlmfsConfig()
-    assert config.shm_name == "slmfs_shm"
+    assert config.shm_path.name == "ipc_shm.bin"
+    assert config.shm_path.parent.name == ".slmfs"
     assert config.shm_size == 4 * 1024 * 1024
     assert config.slab_size == 64 * 1024
     assert config.control_block_size == 4096
@@ -18,11 +19,11 @@ def test_default_values():
 
 def test_custom_values():
     config = SlmfsConfig(
-        shm_name="project_a_shm",
+        shm_path="/tmp/project_a/ipc_shm.bin",
         db_path="custom/path.db",
         mount_point="custom_mount",
     )
-    assert config.shm_name == "project_a_shm"
+    assert str(config.shm_path) == "/tmp/project_a/ipc_shm.bin"
     assert str(config.db_path) == "custom/path.db"
     assert str(config.mount_point) == "custom_mount"
 

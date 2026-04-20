@@ -10,7 +10,7 @@ Mathematical foundations: Fisher-Rao retrieval metric (information geometry), sh
 
 ## Architecture
 
-Two-layer design connected via lock-free shared memory:
+Two-layer design connected via file-backed mmap (`~/.slmfs/ipc_shm.bin`):
 
 1. **Python FUSE Frontend** (I/O & Cooker) — Intercepts filesystem calls, parses AI text inputs, generates embedding vectors via local models, packs strictly aligned binary payloads into shared memory.
 2. **C++23 Backend Engine** (Loader & Simulator) — User-space daemon with independent event loop. Zero-copy deserialization via `std::span`, slab allocator, SIMD-optimized vector math, continuous Langevin physics simulation.
@@ -26,7 +26,7 @@ cmake --build build -j$(nproc)
 
 The engine binary is at `build/src/engine/slmfs_engine`. Run with:
 ```bash
-./slmfs_engine --db-path=.slmfs/memory.db --shm-name=slmfs_shm
+./slmfs_engine --db-path=.slmfs/memory.db
 ```
 
 ## Test
@@ -56,7 +56,7 @@ All libraries are C++ static libraries with public include directories. Each is 
 ## Naming Conventions
 
 - C++ namespaces: `slm::slab`, `slm::metric`, `slm::langevin`, `slm::sheaf`, `slm::engine`, `slm::persist`
-- Shared memory default name: `slmfs_shm`
+- Shared memory file: `~/.slmfs/ipc_shm.bin` (file-backed mmap)
 - Data directory default: `.slmfs/`
 - Python package: `slmfs`
 - Binary: `slmfs_engine`

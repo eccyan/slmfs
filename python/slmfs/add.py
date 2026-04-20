@@ -1,6 +1,6 @@
 """Online bulk ingestion into a running engine.
 
-Usage: python -m slmfs.add <file.md> [file2.md ...] [--shm-name=name]
+Usage: python -m slmfs.add <file.md> [file2.md ...] [--shm-path=path]
 
 Bypasses FUSE — streams chunks directly via shared memory with
 backpressure handling when the slab pool is temporarily full.
@@ -70,17 +70,17 @@ def main():
     paths: list[Path] = []
 
     for arg in sys.argv[1:]:
-        if arg.startswith("--shm-name="):
-            config.shm_name = arg.split("=", 1)[1]
+        if arg.startswith("--shm-path="):
+            config.shm_path = Path(arg.split("=", 1)[1]).expanduser()
         else:
             paths.append(Path(arg))
 
     if not paths:
         print("Usage: python -m slmfs.add <file.md> [file2.md ...]")
-        print("       python -m slmfs.add --shm-name=slmfs_shm *.md")
+        print("       python -m slmfs.add --shm-path=~/.slmfs/ipc_shm.bin *.md")
         sys.exit(1)
 
-    print(f"Connecting to engine via shm: {config.shm_name}")
+    print(f"Connecting to engine via shm: {config.shm_path}")
     embedder = MiniLMEmbedder()
     shm = ShmClient(config)
 

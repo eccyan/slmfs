@@ -8,6 +8,7 @@
 
 #include <csignal>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <thread>
@@ -26,7 +27,8 @@ static void signal_handler(int /*sig*/) {
 }
 
 int main(int argc, char* argv[]) {
-    std::string shm_name = "slmfs_shm";
+    // Default shm_path: ~/.slmfs/ipc_shm.bin (file-backed mmap)
+    std::filesystem::path shm_path;
     std::filesystem::path db_path = ".slmfs/memory.db";
     uint32_t shm_size = 4 * 1024 * 1024;
     uint32_t slab_size = 64 * 1024;
@@ -34,49 +36,63 @@ int main(int argc, char* argv[]) {
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg.starts_with("--shm-name=")) {
-            shm_name = arg.substr(11);
+        if (arg.starts_with("--shm-path=")) {
+            shm_path = arg.substr(11);
         } else if (arg.starts_with("--db-path=")) {
             db_path = arg.substr(10);
         }
     }
 
+    // Default shm_path under ~/.slmfs/
+    if (shm_path.empty()) {
+        const char* home = std::getenv("HOME");
+        if (!home) {
+            std::cerr << "HOME not set\n";
+            return 1;
+        }
+        shm_path = std::filesystem::path(home) / ".slmfs" / "ipc_shm.bin";
+    }
+
     if (!db_path.parent_path().empty()) {
         std::filesystem::create_directories(db_path.parent_path());
+    }
+    if (!shm_path.parent_path().empty()) {
+        std::filesystem::create_directories(shm_path.parent_path());
     }
 
     uint32_t slab_count = (shm_size - ctrl_size) / slab_size;
 
-    // POSIX shm names must start with '/' — ensure it
-    std::string shm_path = shm_name.starts_with('/') ? shm_name : "/" + shm_name;
-
     std::cout << "SLMFS Engine starting...\n"
-              << "  shm_name:   " << shm_name << "\n"
+              << "  shm_path:   " << shm_path << "\n"
               << "  db_path:    " << db_path << "\n"
               << "  slab_count: " << slab_count << "\n"
               << "  slab_size:  " << slab_size << "\n";
 
-    int shm_fd = shm_open(shm_path.c_str(), O_CREAT | O_RDWR, 0666);
+    // File-backed mmap: create/open a regular file instead of POSIX shm
+    int shm_fd = open(shm_path.c_str(), O_CREAT | O_RDWR, 0666);
     if (shm_fd < 0) {
-        std::cerr << "Failed to create shared memory: " << shm_name << "\n";
+        std::cerr << "Failed to open shm file: " << shm_path << "\n";
         return 1;
     }
 
     if (ftruncate(shm_fd, shm_size) < 0) {
-        std::cerr << "Failed to resize shared memory\n";
+        std::cerr << "Failed to resize shm file\n";
         close(shm_fd);
-        shm_unlink(shm_path.c_str());
         return 1;
     }
 
     void* shm_ptr = mmap(nullptr, shm_size, PROT_READ | PROT_WRITE,
                           MAP_SHARED, shm_fd, 0);
     if (shm_ptr == MAP_FAILED) {
-        std::cerr << "Failed to mmap shared memory\n";
+        std::cerr << "Failed to mmap shm file\n";
         close(shm_fd);
-        shm_unlink(shm_path.c_str());
         return 1;
     }
+
+    // Zero the entire region to clear stale queue state from previous runs.
+    // File-backed mmap persists across restarts, so without this the SPSC
+    // ring buffer head/tail and buffered handles would carry over.
+    std::memset(shm_ptr, 0, shm_size);
 
     slm::slab::SlabAllocator slab(shm_ptr, slab_count, slab_size, ctrl_size);
     slm::engine::MemoryGraph graph;
@@ -111,7 +127,6 @@ int main(int argc, char* argv[]) {
 
     munmap(shm_ptr, shm_size);
     close(shm_fd);
-    shm_unlink(shm_path.c_str());
 
     std::cout << "Engine stopped.\n";
     return 0;
