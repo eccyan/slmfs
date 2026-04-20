@@ -9,7 +9,7 @@
     <array>
         <string>__SLMFS_ENGINE_PATH__</string>
         <string>--db-path=__SLMFS_DB_PATH__</string>
-        <string>--shm-name=slmfs_shm</string>
+        <string>--shm-path=__SLMFS_SHM_PATH__</string>
     </array>
 
     <key>KeepAlive</key>
