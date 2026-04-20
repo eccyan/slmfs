@@ -1,11 +1,18 @@
 """FUSE filesystem layer for SLMFS."""
 
+import ctypes.util
 import errno
 import os
 import stat
 import sys
 import time
 from pathlib import Path
+
+# Auto-detect FUSE-T on macOS if fusepy can't find libfuse
+if sys.platform == "darwin" and not os.environ.get("FUSE_LIBRARY_PATH"):
+    _fuse_t = ctypes.util.find_library("fuse-t")
+    if _fuse_t:
+        os.environ["FUSE_LIBRARY_PATH"] = _fuse_t
 
 import numpy as np
 from fuse import FUSE, FuseOSError, Operations
