@@ -22,3 +22,14 @@ target_link_libraries(metric_tests PRIVATE
 )
 
 gtest_discover_tests(metric_tests)
+
+add_executable(langevin_tests
+    test_langevin.cpp
+)
+
+target_link_libraries(langevin_tests PRIVATE
+    langevin
+    GTest::gtest_main
+)
+
+gtest_discover_tests(langevin_tests)
