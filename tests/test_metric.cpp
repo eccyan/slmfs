@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <metric/gaussian_node.hpp>
+#include <metric/simd_ops.hpp>
 #include <vector>
 #include <cmath>
 
@@ -55,4 +56,94 @@ TEST(GaussianNode, StructLayout) {
     EXPECT_EQ(node.access_count, 5u);
     EXPECT_FLOAT_EQ(node.mu[0], 1.0f);
     EXPECT_FLOAT_EQ(node.sigma[1], 0.5f);
+}
+
+// --- SIMD kernel tests ---
+
+TEST(SimdOps, WeightedSqDiffIdentical) {
+    std::vector<float> mu = {1.0f, 2.0f, 3.0f, 4.0f};
+    std::vector<float> sigma = {1.0f, 1.0f, 1.0f, 1.0f};
+    float result = slm::metric::simd_weighted_sq_diff(
+        mu.data(), mu.data(), sigma.data(), sigma.data(), 4
+    );
+    EXPECT_FLOAT_EQ(result, 0.0f);
+}
+
+TEST(SimdOps, WeightedSqDiffSimple) {
+    std::vector<float> mu_p = {1.0f, 0.0f, 0.0f, 0.0f};
+    std::vector<float> mu_q = {0.0f, 0.0f, 0.0f, 0.0f};
+    std::vector<float> sigma = {1.0f, 1.0f, 1.0f, 1.0f};
+    float result = slm::metric::simd_weighted_sq_diff(
+        mu_p.data(), mu_q.data(), sigma.data(), sigma.data(), 4
+    );
+    EXPECT_FLOAT_EQ(result, 1.0f);
+}
+
+TEST(SimdOps, WeightedSqDiffWithSigma) {
+    std::vector<float> mu_p = {2.0f};
+    std::vector<float> mu_q = {0.0f};
+    std::vector<float> sigma_p = {2.0f};
+    std::vector<float> sigma_q = {2.0f};
+    float result = slm::metric::simd_weighted_sq_diff(
+        mu_p.data(), mu_q.data(), sigma_p.data(), sigma_q.data(), 1
+    );
+    EXPECT_FLOAT_EQ(result, 1.0f);
+}
+
+TEST(SimdOps, WeightedSqDiffHighDim) {
+    constexpr uint32_t dim = 384;
+    std::vector<float> mu_p(dim, 1.0f);
+    std::vector<float> mu_q(dim, 0.0f);
+    std::vector<float> sigma(dim, 1.0f);
+    float result = slm::metric::simd_weighted_sq_diff(
+        mu_p.data(), mu_q.data(), sigma.data(), sigma.data(), dim
+    );
+    EXPECT_NEAR(result, 384.0f, 1e-3f);
+}
+
+TEST(SimdOps, VarianceDivergenceIdentical) {
+    std::vector<float> sigma = {1.0f, 2.0f, 3.0f, 4.0f};
+    float result = slm::metric::simd_variance_divergence(
+        sigma.data(), sigma.data(), 4
+    );
+    EXPECT_FLOAT_EQ(result, 0.0f);
+}
+
+TEST(SimdOps, VarianceDivergenceSimple) {
+    std::vector<float> sigma_p = {1.0f};
+    std::vector<float> sigma_q = {std::exp(1.0f)};
+    float result = slm::metric::simd_variance_divergence(
+        sigma_p.data(), sigma_q.data(), 1
+    );
+    EXPECT_NEAR(result, 4.0f, 1e-5f);
+}
+
+TEST(SimdOps, VarianceDivergenceMultiDim) {
+    std::vector<float> sigma_p = {1.0f, 1.0f};
+    std::vector<float> sigma_q = {std::exp(1.0f), std::exp(1.0f)};
+    float result = slm::metric::simd_variance_divergence(
+        sigma_p.data(), sigma_q.data(), 2
+    );
+    EXPECT_NEAR(result, 8.0f, 1e-4f);
+}
+
+TEST(SimdOps, VarianceDivergenceHighDim) {
+    constexpr uint32_t dim = 384;
+    std::vector<float> sigma_p(dim, 1.0f);
+    std::vector<float> sigma_q(dim, 2.0f);
+    float result = slm::metric::simd_variance_divergence(
+        sigma_p.data(), sigma_q.data(), dim
+    );
+    float expected = dim * (2.0f * std::log(2.0f)) * (2.0f * std::log(2.0f));
+    EXPECT_NEAR(result, expected, 0.5f);
+}
+
+TEST(SimdOps, NonAlignedDimension) {
+    std::vector<float> mu_p = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f};
+    std::vector<float> mu_q = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    std::vector<float> sigma(7, 1.0f);
+    float result = slm::metric::simd_weighted_sq_diff(
+        mu_p.data(), mu_q.data(), sigma.data(), sigma.data(), 7
+    );
+    EXPECT_NEAR(result, 140.0f, 1e-3f);
 }
