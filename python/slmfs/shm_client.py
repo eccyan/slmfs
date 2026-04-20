@@ -1,4 +1,15 @@
-"""Shared memory client for IPC with the C++ engine."""
+"""Shared memory client for IPC with the C++ engine.
+
+Safety model:
+- Single Python producer assumed (FUSE runs with nothreads=True, or slmfs add
+  runs standalone). Multiple concurrent Python producers are NOT supported.
+- The C++ engine is the sole consumer of the SPSC queue.
+- Slab acquire: only Python acquires (clears bits). C++ only releases (sets bits
+  via atomic fetch_or). This means the Python load-check-store on the bitmask is
+  safe because there is no concurrent acquirer.
+- Slab release: Python sets bits (for READ response acknowledgement). C++ also
+  sets bits. Both are idempotent OR operations on disjoint bits, so no conflict.
+"""
 
 import ctypes
 import struct
@@ -11,8 +22,20 @@ from .cooker import DONE_MAGIC
 
 
 class ShmClient:
-    """Python-side shared memory access: slab allocation + SPSC push."""
+    """Python-side shared memory access: slab allocation + SPSC push.
 
+    IMPORTANT: Only one Python process should use this at a time.
+    Running FUSE and slmfs-add simultaneously against the same shared
+    memory is not supported (would require a real interprocess mutex).
+    """
+
+    # Control block layout (must match C++ ControlBlock):
+    # [0..8)     atomic<uint64_t> free_bitmask
+    # [64..72)   head (atomic, cache-line padded)
+    # [128..136) cached_tail
+    # [192..200) tail (atomic)
+    # [256..264) cached_head
+    # [320..1344) buffer[256] (uint32_t each)
     _BITMASK_OFF = 0
     _RING_HEAD_OFF = 64
     _RING_TAIL_OFF = 192
@@ -35,22 +58,33 @@ class ShmClient:
         self._shm.close()
 
     def acquire_slab(self) -> Optional[int]:
-        """Atomic CAS on free_bitmask. Returns slab index or None."""
-        while True:
-            current = struct.unpack_from("<Q", self._buf, self._BITMASK_OFF)[0]
-            if current == 0:
-                return None
-            idx = (current & -current).bit_length() - 1
-            new_val = current & ~(1 << idx)
-            ptr = ctypes.c_uint64.from_buffer(self._buf, self._BITMASK_OFF)
-            if ctypes.c_uint64(current).value == ptr.value:
-                ptr.value = new_val
-                return idx
+        """Acquire a free slab. Returns slab index or None if pool exhausted.
+
+        Safety: only one Python process may call this concurrently.
+        The C++ engine never acquires slabs (only releases), so the
+        single-producer load-check-store is race-free.
+        """
+        current = struct.unpack_from("<Q", self._buf, self._BITMASK_OFF)[0]
+        if current == 0:
+            return None
+
+        # Find lowest set bit = first free slab
+        idx = (current & -current).bit_length() - 1
+
+        # Clear that bit (mark as in-use)
+        new_val = current & ~(1 << idx)
+        struct.pack_into("<Q", self._buf, self._BITMASK_OFF, new_val)
+        return idx
 
     def release_slab(self, index: int):
-        """Set bit back in bitmask."""
-        ptr = ctypes.c_uint64.from_buffer(self._buf, self._BITMASK_OFF)
-        ptr.value |= 1 << index
+        """Return a slab to the free pool.
+
+        Safe for concurrent use: setting a bit is idempotent and the
+        C++ engine sets disjoint bits (for WRITE slabs it released).
+        """
+        current = struct.unpack_from("<Q", self._buf, self._BITMASK_OFF)[0]
+        new_val = current | (1 << index)
+        struct.pack_into("<Q", self._buf, self._BITMASK_OFF, new_val)
 
     def write_to_slab(self, index: int, payload: bytes):
         """Copy payload into slab."""
@@ -67,18 +101,43 @@ class ShmClient:
         offset = self._data_offset + index * self._slab_size + byte_offset
         return struct.unpack_from("<I", self._buf, offset)[0]
 
-    def push_handle(self, handle: int):
-        """Push 32-bit handle to SPSC ring buffer."""
+    def push_handle(self, handle: int) -> bool:
+        """Push 32-bit handle to SPSC ring buffer.
+
+        Returns False if the ring buffer is full (caller should retry).
+        Matches the C++ SPSC protocol: check tail before advancing head.
+        """
         head = struct.unpack_from("<Q", self._buf, self._RING_HEAD_OFF)[0]
         next_head = (head + 1) & self._RING_MASK
+
+        # Check if full: next_head == tail means the ring is full
+        tail = struct.unpack_from("<Q", self._buf, self._RING_TAIL_OFF)[0]
+        if next_head == tail:
+            return False
+
+        # Write value to buffer[head & mask]
         slot_off = self._RING_BUF_OFF + (head & self._RING_MASK) * 4
         struct.pack_into("<I", self._buf, slot_off, handle)
+
+        # Release store: increment head
         struct.pack_into("<Q", self._buf, self._RING_HEAD_OFF, next_head)
+        return True
+
+    def push_handle_blocking(
+        self, handle: int, timeout: float = 5.0, retry_delay: float = 0.001
+    ) -> bool:
+        """Push handle with retry on full ring. Returns False on timeout."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.push_handle(handle):
+                return True
+            time.sleep(retry_delay)
+        return False
 
     def wait_for_done(
         self, slab_index: int, timeout: float = 1.0
     ) -> Optional[bytes]:
-        """Spin-wait for engine to write DONE magic, then read result."""
+        """Spin-wait for engine to write DONE magic, then read and release slab."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             magic = self.read_slab_u32(slab_index, 0)

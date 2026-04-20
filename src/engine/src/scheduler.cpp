@@ -72,13 +72,14 @@ void Scheduler::process_tier1() {
         switch (cmd) {
         case slab::CMD_WRITE_COMMIT:
             handle_write_commit(slab_idx);
+            slab_.release(slab_idx);
             break;
         case slab::CMD_READ:
+            // Do NOT release — the client owns the slab until it reads
+            // the DONE response and calls release_slab() itself.
             handle_read(slab_idx);
             break;
         }
-
-        slab_.release(slab_idx);
     }
 }
 

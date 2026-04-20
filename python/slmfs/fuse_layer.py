@@ -68,7 +68,9 @@ class SlmfsFS(Operations):
             raise FuseOSError(errno.ENOMEM)
         self.shm.write_to_slab(slab_idx, payload)
         handle = (CMD_READ << 24) | slab_idx
-        self.shm.push_handle(handle)
+        if not self.shm.push_handle_blocking(handle):
+            self.shm.release_slab(slab_idx)
+            return b""
         result = self.shm.wait_for_done(slab_idx)
         if result is None:
             return b""
@@ -86,7 +88,9 @@ class SlmfsFS(Operations):
             raise FuseOSError(errno.ENOMEM)
         self.shm.write_to_slab(slab_idx, payload)
         handle = (CMD_WRITE_COMMIT << 24) | slab_idx
-        self.shm.push_handle(handle)
+        if not self.shm.push_handle_blocking(handle):
+            self.shm.release_slab(slab_idx)
+            raise FuseOSError(errno.EBUSY)
         return len(data)
 
     def create(self, path, mode, fi=None):

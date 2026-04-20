@@ -53,7 +53,7 @@ int main(int argc, char* argv[]) {
               << "  slab_count: " << slab_count << "\n"
               << "  slab_size:  " << slab_size << "\n";
 
-    int shm_fd = shm_open(shm_name.c_str(), O_CREAT | O_RDWR, 0666);
+    int shm_fd = shm_open(shm_name.c_str(), O_CREAT | O_RDWR, 0600);
     if (shm_fd < 0) {
         std::cerr << "Failed to create shared memory: " << shm_name << "\n";
         return 1;

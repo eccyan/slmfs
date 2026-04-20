@@ -55,7 +55,10 @@ def add_file(
 
         shm.write_to_slab(slab_idx, payload)
         handle = (CMD_WRITE_COMMIT << 24) | slab_idx
-        shm.push_handle(handle)
+        if not shm.push_handle_blocking(handle):
+            print(f"  WARNING: ring buffer full, releasing slab for chunk {i}")
+            shm.release_slab(slab_idx)
+            continue
         ingested += 1
 
     return ingested
