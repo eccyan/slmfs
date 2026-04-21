@@ -8,15 +8,14 @@ LangevinStepper::LangevinStepper(Config config)
     : config_(config) {}
 
 void LangevinStepper::activate(NodeState& node, double current_time,
-                                std::mt19937& rng) {
+                                std::mt19937& rng) const {
     // Small thermal kick at random angle so the node has a drift direction
     // and doesn't get stuck at the origin singularity.
-    constexpr float KICK_RADIUS = 0.01f;
     std::uniform_real_distribution<float> angle_dist(
         0.0f, 2.0f * std::numbers::pi_v<float>);
     float theta = angle_dist(rng);
-    node.pos = {KICK_RADIUS * std::cos(theta),
-                KICK_RADIUS * std::sin(theta)};
+    node.pos = {config_.thermal_kick_radius * std::cos(theta),
+                config_.thermal_kick_radius * std::sin(theta)};
     node.last_access_time = current_time;
     node.access_count += 1;
 }

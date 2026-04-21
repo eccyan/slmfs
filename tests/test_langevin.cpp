@@ -85,6 +85,11 @@ TEST(NodeState, DefaultConstruction) {
 #include <langevin/sde_stepper.hpp>
 
 // --- LangevinStepper activate tests ---
+// activate() is now a const member function (reads thermal_kick_radius from config).
+
+static const LangevinStepper DEFAULT_STEPPER({
+    .dt = 5.0f, .lambda_decay = 5.0e-6f, .noise_scale = 0.0f,
+    .archive_threshold = 0.95f, .thermal_kick_radius = 0.01f});
 
 TEST(LangevinActivate, ResetsWithThermalKick) {
     NodeState node{};
@@ -93,7 +98,7 @@ TEST(LangevinActivate, ResetsWithThermalKick) {
     node.access_count = 3;
     std::mt19937 rng(42);
 
-    LangevinStepper::activate(node, 200.0, rng);
+    DEFAULT_STEPPER.activate(node, 200.0, rng);
 
     EXPECT_NEAR(node.pos.radius(), 0.01f, 1e-6f)
         << "Activated node should have thermal kick radius of ~0.01";
@@ -106,10 +111,10 @@ TEST(LangevinActivate, IncrementsAccessCount) {
     node.access_count = 0;
     std::mt19937 rng(42);
 
-    LangevinStepper::activate(node, 1.0, rng);
+    DEFAULT_STEPPER.activate(node, 1.0, rng);
     EXPECT_EQ(node.access_count, 1u);
 
-    LangevinStepper::activate(node, 2.0, rng);
+    DEFAULT_STEPPER.activate(node, 2.0, rng);
     EXPECT_EQ(node.access_count, 2u);
 }
 
@@ -118,7 +123,7 @@ TEST(LangevinActivate, UpdatesTimestamp) {
     node.last_access_time = 50.0;
     std::mt19937 rng(42);
 
-    LangevinStepper::activate(node, 999.0, rng);
+    DEFAULT_STEPPER.activate(node, 999.0, rng);
     EXPECT_DOUBLE_EQ(node.last_access_time, 999.0);
 }
 
@@ -126,8 +131,8 @@ TEST(LangevinActivate, RandomAngleVaries) {
     NodeState node_a{}, node_b{};
     std::mt19937 rng_a(42), rng_b(99);
 
-    LangevinStepper::activate(node_a, 0.0, rng_a);
-    LangevinStepper::activate(node_b, 0.0, rng_b);
+    DEFAULT_STEPPER.activate(node_a, 0.0, rng_a);
+    DEFAULT_STEPPER.activate(node_b, 0.0, rng_b);
 
     // Same radius, different angles
     EXPECT_NEAR(node_a.pos.radius(), node_b.pos.radius(), 1e-6f);
@@ -137,17 +142,30 @@ TEST(LangevinActivate, RandomAngleVaries) {
         << "Different RNG seeds should produce different kick angles";
 }
 
+TEST(LangevinActivate, CustomKickRadius) {
+    LangevinStepper big_kick({.dt = 5.0f, .lambda_decay = 0.0f, .noise_scale = 0.0f,
+                               .archive_threshold = 0.95f, .thermal_kick_radius = 0.05f});
+    NodeState node{};
+    std::mt19937 rng(42);
+
+    big_kick.activate(node, 0.0, rng);
+    EXPECT_NEAR(node.pos.radius(), 0.05f, 1e-6f)
+        << "Kick radius should match config value";
+}
+
 TEST(LangevinConfig, DefaultValues) {
     LangevinStepper::Config config{};
     config.dt = 5.0f;
     config.lambda_decay = 5.0e-6f;
     config.noise_scale = 2.0e-4f;
     config.archive_threshold = 0.95f;
+    config.thermal_kick_radius = 0.01f;
 
     EXPECT_FLOAT_EQ(config.dt, 5.0f);
     EXPECT_FLOAT_EQ(config.lambda_decay, 5.0e-6f);
     EXPECT_FLOAT_EQ(config.noise_scale, 2.0e-4f);
     EXPECT_FLOAT_EQ(config.archive_threshold, 0.95f);
+    EXPECT_FLOAT_EQ(config.thermal_kick_radius, 0.01f);
 }
 
 // --- LangevinStepper step tests ---
@@ -158,7 +176,7 @@ static constexpr float SECS_PER_DAY = 86400.0f;
 
 TEST(LangevinStep, NoNodesReturnsEmpty) {
     LangevinStepper stepper({.dt = 5.0f, .lambda_decay = 5.0e-6f,
-                              .noise_scale = 0.0f, .archive_threshold = 0.95f});
+                              .noise_scale = 0.0f, .archive_threshold = 0.95f, .thermal_kick_radius = 0.01f});
     std::mt19937 rng(42);
     std::span<NodeState> empty;
     auto archived = stepper.step(empty, 100.0, rng);
@@ -168,7 +186,7 @@ TEST(LangevinStep, NoNodesReturnsEmpty) {
 TEST(LangevinStep, DeterministicDriftWithoutNoise) {
     // Use a large lambda so drift is visible over a 1-day age
     LangevinStepper stepper({.dt = 5.0f, .lambda_decay = 1.0e-3f,
-                              .noise_scale = 0.0f, .archive_threshold = 0.95f});
+                              .noise_scale = 0.0f, .archive_threshold = 0.95f, .thermal_kick_radius = 0.01f});
     std::mt19937 rng(42);
 
     NodeState node{};
@@ -187,7 +205,7 @@ TEST(LangevinStep, DeterministicDriftWithoutNoise) {
 
 TEST(LangevinStep, RecentlyAccessedDriftsLess) {
     LangevinStepper stepper({.dt = 5.0f, .lambda_decay = 1.0e-3f,
-                              .noise_scale = 0.0f, .archive_threshold = 0.95f});
+                              .noise_scale = 0.0f, .archive_threshold = 0.95f, .thermal_kick_radius = 0.01f});
 
     NodeState node_a{};
     node_a.pos = {0.3f, 0.0f};
@@ -211,7 +229,7 @@ TEST(LangevinStep, RecentlyAccessedDriftsLess) {
 
 TEST(LangevinStep, NodeAtOriginDriftsNowhere) {
     LangevinStepper stepper({.dt = 5.0f, .lambda_decay = 1.0e-3f,
-                              .noise_scale = 0.0f, .archive_threshold = 0.95f});
+                              .noise_scale = 0.0f, .archive_threshold = 0.95f, .thermal_kick_radius = 0.01f});
     std::mt19937 rng(42);
 
     NodeState node{};
@@ -226,7 +244,7 @@ TEST(LangevinStep, NodeAtOriginDriftsNowhere) {
 TEST(LangevinStep, ArchivesNodesBeyondThreshold) {
     // Very large lambda to force archival in one step
     LangevinStepper stepper({.dt = 5.0f, .lambda_decay = 1.0f,
-                              .noise_scale = 0.0f, .archive_threshold = 0.95f});
+                              .noise_scale = 0.0f, .archive_threshold = 0.95f, .thermal_kick_radius = 0.01f});
     std::mt19937 rng(42);
 
     NodeState node{};
@@ -242,7 +260,7 @@ TEST(LangevinStep, ArchivesNodesBeyondThreshold) {
 
 TEST(LangevinStep, StaysInsideDisk) {
     LangevinStepper stepper({.dt = 100.0f, .lambda_decay = 1.0f,
-                              .noise_scale = 0.0f, .archive_threshold = 0.95f});
+                              .noise_scale = 0.0f, .archive_threshold = 0.95f, .thermal_kick_radius = 0.01f});
     std::mt19937 rng(42);
 
     NodeState node{};
@@ -257,7 +275,7 @@ TEST(LangevinStep, StaysInsideDisk) {
 
 TEST(LangevinStep, NoiseAddsRandomness) {
     LangevinStepper stepper({.dt = 5.0f, .lambda_decay = 0.0f,
-                              .noise_scale = 0.1f, .archive_threshold = 0.95f});
+                              .noise_scale = 0.1f, .archive_threshold = 0.95f, .thermal_kick_radius = 0.01f});
 
     NodeState node{};
     node.pos = {0.3f, 0.0f};
@@ -278,7 +296,7 @@ TEST(LangevinStep, NoiseAddsRandomness) {
 
 TEST(LangevinStep, MultipleNodesIndependent) {
     LangevinStepper stepper({.dt = 5.0f, .lambda_decay = 1.0e-3f,
-                              .noise_scale = 0.0f, .archive_threshold = 0.95f});
+                              .noise_scale = 0.0f, .archive_threshold = 0.95f, .thermal_kick_radius = 0.01f});
     std::mt19937 rng(42);
 
     std::vector<NodeState> nodes(3);
@@ -305,7 +323,7 @@ TEST(LangevinStep, MultipleNodesIndependent) {
 TEST(LangevinIntegration, FullLifecycle) {
     // Use production-like constants; simulate many ticks.
     LangevinStepper stepper({.dt = 5.0f, .lambda_decay = 5.0e-6f,
-                              .noise_scale = 0.0f, .archive_threshold = 0.95f});
+                              .noise_scale = 0.0f, .archive_threshold = 0.95f, .thermal_kick_radius = 0.01f});
     std::mt19937 rng(42);
 
     NodeState node{};
@@ -346,7 +364,7 @@ TEST(LangevinIntegration, FullLifecycle) {
 
 TEST(LangevinIntegration, ActivationResetsLifecycle) {
     LangevinStepper stepper({.dt = 5.0f, .lambda_decay = 1.0e-3f,
-                              .noise_scale = 0.0f, .archive_threshold = 0.95f});
+                              .noise_scale = 0.0f, .archive_threshold = 0.95f, .thermal_kick_radius = 0.01f});
     std::mt19937 rng(42);
 
     NodeState node{};
@@ -366,7 +384,7 @@ TEST(LangevinIntegration, ActivationResetsLifecycle) {
         << "Should have drifted outward";
 
     // Activate (simulate agent reading the memory)
-    LangevinStepper::activate(nodes[0], t, rng);
+    stepper.activate(nodes[0], t, rng);
     EXPECT_NEAR(nodes[0].pos.radius(), 0.01f, 1e-6f)
         << "Activation should reset to thermal kick radius";
 
@@ -387,7 +405,7 @@ TEST(LangevinIntegration, CohomologyDriftPenalty) {
     // Simulate cohomology integration: superseded node repositioned to (0.0, 0.93)
     // With a large enough lambda and age, one tick should push past threshold.
     LangevinStepper stepper({.dt = 5.0f, .lambda_decay = 1.0f,
-                              .noise_scale = 0.0f, .archive_threshold = 0.95f});
+                              .noise_scale = 0.0f, .archive_threshold = 0.95f, .thermal_kick_radius = 0.01f});
     std::mt19937 rng(42);
 
     NodeState node{};
@@ -405,7 +423,7 @@ TEST(LangevinIntegration, NoiseTooWeakToArchiveAlone) {
     // With default noise_scale and zero drift, pure Brownian motion
     // should not push a node to the archive boundary in 14 days.
     LangevinStepper stepper({.dt = 5.0f, .lambda_decay = 0.0f,
-                              .noise_scale = 2.0e-4f, .archive_threshold = 0.95f});
+                              .noise_scale = 2.0e-4f, .archive_threshold = 0.95f, .thermal_kick_radius = 0.01f});
     std::mt19937 rng(42);
 
     NodeState node{};

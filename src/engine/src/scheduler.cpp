@@ -105,7 +105,7 @@ void Scheduler::handle_write_commit(uint32_t slab_idx) {
     state.last_access_time = current_time();
     state.access_count = 0;
     // Thermal kick so the node has a drift direction from birth.
-    langevin::LangevinStepper::activate(state, state.last_access_time, rng_);
+    langevin_.activate(state, state.last_access_time, rng_);
 
     auto node_id = graph_.insert(
         std::move(mu), std::move(sigma), std::move(text),
@@ -221,7 +221,7 @@ void Scheduler::handle_read(uint32_t slab_idx) {
                 auto& snap = archived_hits[hit.archived_idx];
                 // Use a temporary NodeState for the kick, then copy coords
                 langevin::NodeState tmp{};
-                langevin::LangevinStepper::activate(tmp, current_time(), rng_);
+                langevin_.activate(tmp, current_time(), rng_);
                 snap.pos_x = tmp.pos.x;
                 snap.pos_y = tmp.pos.y;
                 snap.access_count += 1;
@@ -230,7 +230,7 @@ void Scheduler::handle_read(uint32_t slab_idx) {
                 persist_.reactivate_node(snap.id);
             } else {
                 // Activate in-memory node: pull to center with thermal kick
-                langevin::LangevinStepper::activate(
+                langevin_.activate(
                     graph_.state(hit.active_id), current_time(), rng_);
             }
         }

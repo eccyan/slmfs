@@ -32,7 +32,8 @@ struct SchedulerFixture : public ::testing::Test {
     FisherRaoMetric metric;
     CoboundaryOperator sheaf;
     LangevinStepper langevin{{.dt = 5.0f, .lambda_decay = 5.0e-6f,
-                               .noise_scale = 0.0f, .archive_threshold = 0.95f}};
+                               .noise_scale = 0.0f, .archive_threshold = 0.95f,
+                               .thermal_kick_radius = 0.01f}};
     std::filesystem::path db_path;
     std::unique_ptr<SqliteStore> store;
 

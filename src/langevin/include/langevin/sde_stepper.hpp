@@ -19,6 +19,7 @@ public:
         float lambda_decay;        // outward drift rate (per day²·second)
         float noise_scale;         // diffusion intensity
         float archive_threshold;   // radius threshold for archiving (e.g., 0.95)
+        float thermal_kick_radius; // initial offset on activation (e.g., 0.01)
     };
 
     explicit LangevinStepper(Config config);
@@ -31,9 +32,9 @@ public:
     ) const;
 
     /// Reset a node to the disk center with a small random thermal kick
-    /// (r ≈ 0.01) so it has a drift direction.
-    static void activate(NodeState& node, double current_time,
-                         std::mt19937& rng);
+    /// so it has a drift direction. Kick radius is taken from config.
+    void activate(NodeState& node, double current_time,
+                  std::mt19937& rng) const;
 
     const Config& config() const { return config_; }
 
