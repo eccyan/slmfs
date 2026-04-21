@@ -100,8 +100,8 @@ int main(int argc, char* argv[]) {
     slm::sheaf::CoboundaryOperator sheaf;
     slm::langevin::LangevinStepper langevin({
         .dt = 5.0f,
-        .lambda_decay = 0.01f,
-        .noise_scale = 0.001f,
+        .lambda_decay = 5.0e-6f,
+        .noise_scale = 2.0e-4f,
         .archive_threshold = 0.95f,
     });
     slm::persist::SqliteStore store(db_path);

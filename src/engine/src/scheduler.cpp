@@ -102,9 +102,10 @@ void Scheduler::handle_write_commit(uint32_t slab_idx) {
     std::vector<float> sigma(hdr.vector_dim, metric::SIGMA_MAX);
 
     langevin::NodeState state{};
-    state.pos = {0.0f, 0.0f};
     state.last_access_time = current_time();
     state.access_count = 0;
+    // Thermal kick so the node has a drift direction from birth.
+    langevin::LangevinStepper::activate(state, state.last_access_time, rng_);
 
     auto node_id = graph_.insert(
         std::move(mu), std::move(sigma), std::move(text),
@@ -216,18 +217,21 @@ void Scheduler::handle_read(uint32_t slab_idx) {
             }
 
             if (hit.is_archived) {
-                // Reactivate: re-insert into graph at Poincaré center
+                // Reactivate: re-insert into graph with thermal kick
                 auto& snap = archived_hits[hit.archived_idx];
-                snap.pos_x = 0.0f;
-                snap.pos_y = 0.0f;
+                // Use a temporary NodeState for the kick, then copy coords
+                langevin::NodeState tmp{};
+                langevin::LangevinStepper::activate(tmp, current_time(), rng_);
+                snap.pos_x = tmp.pos.x;
+                snap.pos_y = tmp.pos.y;
                 snap.access_count += 1;
                 snap.last_access = current_time();
                 graph_.insert_from_snapshot(snap);
                 persist_.reactivate_node(snap.id);
             } else {
-                // Activate in-memory node: pull to center
+                // Activate in-memory node: pull to center with thermal kick
                 langevin::LangevinStepper::activate(
-                    graph_.state(hit.active_id), current_time());
+                    graph_.state(hit.active_id), current_time(), rng_);
             }
         }
     }
