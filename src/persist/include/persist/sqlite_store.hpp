@@ -26,10 +26,10 @@ public:
     std::vector<engine::MemoryGraph::NodeSnapshot> retrieve_archived(
         const metric::GaussianNode& query,
         const metric::FisherRaoMetric& metric,
-        uint32_t k);
+        uint32_t k) override;
 
     /// Remove an archived node (status=1) from the DB by id.
-    void reactivate_node(uint32_t node_id);
+    void reactivate_node(uint32_t node_id) override;
 
 private:
     sqlite3* db_{nullptr};

@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <cstring>
 #include <string>
-#include <string_view>
 
 namespace slm::engine {
 
