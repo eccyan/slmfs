@@ -169,3 +169,62 @@ TEST_F(SchedulerFixture, GracefulShutdownFlushes) {
     EXPECT_EQ(loaded.size(), 1u);
     EXPECT_EQ(loaded.text(loaded.all_ids()[0]), "Persisted on shutdown");
 }
+
+TEST_F(SchedulerFixture, SearchFindsArchivedNodes) {
+    // Pre-populate an archived node directly in SQLite
+    MemoryGraph temp_graph;
+    std::vector<float> arch_mu = {1.0f, 0.0f, 0.0f, 0.0f};
+    std::vector<float> arch_sigma = {1.0f, 1.0f, 1.0f, 1.0f};
+    auto arch_id = temp_graph.insert(arch_mu, arch_sigma, "Archived memory", 0, 0,
+                                      NodeState{.pos = {0.96f, 0.0f}, .access_count = 3});
+    store->archive_node(temp_graph.snapshot(arch_id));
+
+    // No active nodes in the graph — search must hit the archive
+    ASSERT_EQ(graph.size(), 0u);
+
+    Scheduler::Config cfg{};
+    cfg.search_top_k = 5;
+    Scheduler scheduler(*slab, slab->cmd_queue(), graph, metric, sheaf,
+                         langevin, *store, cfg);
+
+    // Submit a search read with the same embedding
+    auto idx = slab->acquire();
+    ASSERT_TRUE(idx.has_value());
+
+    auto span = slab->get(*idx);
+    auto* hdr = reinterpret_cast<MemoryFSHeader*>(span.data());
+    std::memset(hdr, 0, sizeof(MemoryFSHeader));
+    hdr->magic = MEMFS_MAGIC;
+    hdr->command = CMD_READ;
+    hdr->text_offset = 64;
+    hdr->text_length = 0;
+    hdr->vector_offset = 64;
+    hdr->vector_dim = 4;
+
+    float query_vec[] = {1.0f, 0.0f, 0.0f, 0.0f};
+    std::memcpy(span.data() + hdr->vector_offset, query_vec, sizeof(query_vec));
+
+    auto handle = encode_handle(CMD_READ, *idx);
+    ASSERT_TRUE(slab->cmd_queue().try_push(handle));
+
+    std::thread t([&] { scheduler.run(); });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    scheduler.request_stop();
+    t.join();
+
+    // The archived node should have been reactivated into the graph
+    EXPECT_GE(graph.size(), 1u);
+
+    // Check the response slab contains the archived text
+    auto resp_span = slab->get(*idx);
+    auto* resp_hdr = reinterpret_cast<const MemoryFSHeader*>(resp_span.data());
+    EXPECT_EQ(resp_hdr->magic, MEMFS_DONE);
+    EXPECT_GT(resp_hdr->text_length, 0u);
+
+    std::string response(
+        reinterpret_cast<const char*>(resp_span.data() + resp_hdr->text_offset),
+        resp_hdr->text_length);
+    EXPECT_NE(response.find("Archived memory"), std::string::npos)
+        << "Response was: " << response;
+}

@@ -1,4 +1,5 @@
 #include <persist/sqlite_store.hpp>
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 
@@ -179,6 +180,95 @@ void SqliteStore::archive_node(const engine::MemoryGraph::NodeSnapshot& snap) {
         sqlite3_bind_text(stmt, 11, snap.annotation.c_str(), -1, SQLITE_TRANSIENT);
     }
 
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+}
+
+std::vector<engine::MemoryGraph::NodeSnapshot> SqliteStore::retrieve_archived(
+    const metric::GaussianNode& query,
+    const metric::FisherRaoMetric& fr_metric,
+    uint32_t k)
+{
+    sqlite3_stmt* stmt = nullptr;
+    sqlite3_prepare_v2(db_,
+        "SELECT id, parent_id, depth, text, mu, sigma, access_count, "
+        "       pos_x, pos_y, last_access, annotation "
+        "FROM memory_nodes WHERE status = 1",
+        -1, &stmt, nullptr);
+
+    std::vector<engine::MemoryGraph::NodeSnapshot> all;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        engine::MemoryGraph::NodeSnapshot snap;
+        snap.id        = static_cast<uint32_t>(sqlite3_column_int(stmt, 0));
+        snap.parent_id = static_cast<uint32_t>(sqlite3_column_int(stmt, 1));
+        snap.depth     = static_cast<uint8_t>(sqlite3_column_int(stmt, 2));
+
+        const char* text = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+        snap.text = text ? text : "";
+
+        const float* mu_data = static_cast<const float*>(sqlite3_column_blob(stmt, 4));
+        int mu_bytes = sqlite3_column_bytes(stmt, 4);
+        snap.mu.assign(mu_data, mu_data + mu_bytes / static_cast<int>(sizeof(float)));
+
+        const float* sigma_data = static_cast<const float*>(sqlite3_column_blob(stmt, 5));
+        int sigma_bytes = sqlite3_column_bytes(stmt, 5);
+        snap.sigma.assign(sigma_data, sigma_data + sigma_bytes / static_cast<int>(sizeof(float)));
+
+        snap.access_count = static_cast<uint32_t>(sqlite3_column_int(stmt, 6));
+        snap.pos_x        = static_cast<float>(sqlite3_column_double(stmt, 7));
+        snap.pos_y        = static_cast<float>(sqlite3_column_double(stmt, 8));
+        snap.last_access  = sqlite3_column_double(stmt, 9);
+
+        const char* ann = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 10));
+        snap.annotation = ann ? ann : "";
+
+        all.push_back(std::move(snap));
+    }
+    sqlite3_finalize(stmt);
+
+    if (all.empty()) return {};
+
+    // Build GaussianNode views and score with Fisher-Rao distance
+    std::vector<metric::GaussianNode> candidates;
+    candidates.reserve(all.size());
+    for (const auto& snap : all) {
+        candidates.push_back(metric::GaussianNode{
+            std::span<const float>(snap.mu),
+            std::span<const float>(snap.sigma),
+            snap.access_count
+        });
+    }
+
+    // Compute distances and sort indices
+    std::vector<std::pair<float, std::size_t>> scored;
+    scored.reserve(all.size());
+    for (std::size_t i = 0; i < candidates.size(); ++i) {
+        float d = fr_metric.distance(query, candidates[i]);
+        scored.emplace_back(d, i);
+    }
+    std::sort(scored.begin(), scored.end(),
+              [](const auto& a, const auto& b){ return a.first < b.first; });
+
+    std::size_t count = std::min(static_cast<std::size_t>(k), scored.size());
+    std::vector<engine::MemoryGraph::NodeSnapshot> result;
+    result.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        result.push_back(std::move(all[scored[i].second]));
+    }
+    return result;
+}
+
+void SqliteStore::reactivate_node(uint32_t node_id) {
+    // UPDATE instead of DELETE for crash-safety: if the engine crashes before
+    // the next checkpoint, the node still exists in the DB with active status.
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(db_,
+        "UPDATE memory_nodes SET status = 0, pos_x = 0.0, pos_y = 0.0 "
+        "WHERE id = ? AND status = 1",
+        -1, &stmt, nullptr);
+    if (rc != SQLITE_OK || !stmt) return;
+    sqlite3_bind_int(stmt, 1, static_cast<int>(node_id));
     sqlite3_step(stmt);
     sqlite3_finalize(stmt);
 }
