@@ -67,8 +67,20 @@ def main():
         print("Is the engine running and has it checkpointed at least once?")
         sys.exit(1)
 
-    conn = _connect(db_path)
+    with _connect(db_path) as conn:
+        _run_dashboard(conn)
+
+
+def _run_dashboard(conn: sqlite3.Connection):
     cur = conn.cursor()
+
+    # Verify schema exists
+    cur.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_nodes'"
+    )
+    if cur.fetchone() is None:
+        print("Table 'memory_nodes' not found — has the engine checkpointed?")
+        sys.exit(1)
 
     # --- Node Population ---
     _print_header("Node Population")
@@ -134,14 +146,15 @@ def main():
     print(f"  Avg access count:  {avg_access:.2f}")
     print(f"  Max access count:  {max_access}")
     print(f"  Avg sigma:         {avg_sigma:.4f}")
-    if avg_sigma > 0:
+    if active_count > 0:
         print(f"  Confidence:        {'HIGH' if avg_sigma < 0.5 else 'MEDIUM' if avg_sigma < 1.0 else 'LOW'}")
 
     # --- Cohomology Frictions ---
     _print_header("Cohomology Frictions")
 
     cur.execute(
-        "SELECT COUNT(*) FROM memory_nodes WHERE annotation IS NOT NULL AND annotation != ''"
+        "SELECT COUNT(*) FROM memory_nodes "
+        "WHERE status = 0 AND annotation IS NOT NULL AND annotation != ''"
     )
     friction_count = cur.fetchone()[0]
     print(f"  Nodes with annotations: {friction_count}")
@@ -159,8 +172,6 @@ def main():
     # --- Legend ---
     print("  Legend: + = origin, * = node, . = disk boundary")
     print()
-
-    conn.close()
 
 
 if __name__ == "__main__":

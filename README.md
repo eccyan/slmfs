@@ -63,6 +63,7 @@ python/slmfs/
 +-- fuse_layer.py   FUSE filesystem (active.md + search/)
 +-- init.py         Offline "Day Zero" migration
 +-- add.py          Online bulk ingestion
++-- analyze.py      Brain-wave dashboard (read-only SQLite)
 ```
 
 ## The Agent Experience
@@ -164,6 +165,9 @@ cat ~/.agent_memory/search/deployment_notes.md
 
 # 5. Bulk ingest a large reference document into the running engine
 python -m slmfs add reference_docs.md
+
+# 6. Observe the brain — statistical dashboard of Poincaré disk state
+python -m slmfs analyze
 ```
 
 > **Note:** If you ran `install.sh`, steps 2-3 are already running as background services.
