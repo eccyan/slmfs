@@ -4,6 +4,7 @@ Usage:
     python -m slmfs init <file.md> [...]     Offline migration
     python -m slmfs add <file.md> [...]      Online ingestion
     python -m slmfs fuse [--mount=path]      Mount FUSE filesystem
+    python -m slmfs analyze [--db-path=...]  Brain-wave dashboard
 """
 
 import sys
@@ -26,6 +27,9 @@ def main():
     elif command == "fuse":
         from .fuse_layer import main as fuse_main
         fuse_main()
+    elif command == "analyze":
+        from .analyze import main as analyze_main
+        analyze_main()
     else:
         print(f"Unknown command: {command}")
         print(__doc__)
