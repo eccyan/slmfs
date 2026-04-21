@@ -1,6 +1,7 @@
 #include <engine/scheduler.hpp>
 #include <slab/header.hpp>
 #include <metric/gaussian_node.hpp>
+#include <algorithm>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -135,7 +136,7 @@ void Scheduler::handle_read_active(uint32_t slab_idx) {
 }
 
 void Scheduler::handle_read(uint32_t slab_idx) {
-    // Search read: top-k retrieval + activate matched nodes.
+    // Search read: top-k retrieval from active graph + archived cold storage.
     auto span = slab_.get(slab_idx);
     const auto& hdr = slab_.header(slab_idx);
 
@@ -145,6 +146,13 @@ void Scheduler::handle_read(uint32_t slab_idx) {
         const float* query_ptr = reinterpret_cast<const float*>(
             span.data() + hdr.vector_offset);
 
+        std::vector<float> query_sigma(hdr.vector_dim, metric::SIGMA_MAX);
+        metric::GaussianNode query{
+            std::span<const float>(query_ptr, hdr.vector_dim),
+            query_sigma, 0
+        };
+
+        // Phase 1: Search active nodes in-memory
         std::vector<metric::GaussianNode> candidates;
         std::vector<uint32_t> candidate_ids;
         for (auto id : graph_.all_ids()) {
@@ -153,31 +161,74 @@ void Scheduler::handle_read(uint32_t slab_idx) {
             candidate_ids.push_back(id);
         }
 
+        std::vector<uint32_t> active_top;
         if (!candidates.empty()) {
-            std::vector<float> query_sigma(hdr.vector_dim, metric::SIGMA_MAX);
-            metric::GaussianNode query{
-                std::span<const float>(query_ptr, hdr.vector_dim),
-                query_sigma, 0
-            };
+            active_top = metric_.top_k(query, candidates,
+                                        config_.search_top_k);
+        }
 
-            auto top_indices = metric_.top_k(query, candidates,
-                                              config_.search_top_k);
+        // Phase 2: Search archived nodes via SQLite cold storage
+        auto archived_hits = persist_.retrieve_archived(
+            query, metric_, config_.search_top_k);
 
-            for (auto idx : top_indices) {
-                auto id = candidate_ids[idx];
+        // Phase 3: Score and merge both result sets
+        struct ScoredResult {
+            float distance;
+            std::string text;
+            std::string annotation;
+            uint32_t active_id;       // non-zero if from active graph
+            size_t archived_idx;      // index into archived_hits if from archive
+            bool is_archived;
+        };
+        std::vector<ScoredResult> scored;
 
-                // Append to result BEFORE activate (which resets radius to 0)
-                result += graph_.text(id);
+        for (auto idx : active_top) {
+            auto id = candidate_ids[idx];
+            float dist = metric_.distance(query, candidates[idx]);
+            scored.push_back({dist, graph_.text(id), graph_.annotation(id),
+                              id, 0, false});
+        }
+
+        for (size_t i = 0; i < archived_hits.size(); ++i) {
+            const auto& snap = archived_hits[i];
+            metric::GaussianNode arch_node{snap.mu, snap.sigma, snap.access_count};
+            float dist = metric_.distance(query, arch_node);
+            scored.push_back({dist, snap.text, snap.annotation,
+                              0, i, true});
+        }
+
+        // Phase 4: Sort by distance, take top-k
+        std::sort(scored.begin(), scored.end(),
+                  [](const auto& a, const auto& b) {
+                      return a.distance < b.distance;
+                  });
+
+        uint32_t limit = std::min(static_cast<uint32_t>(scored.size()),
+                                   config_.search_top_k);
+
+        for (uint32_t i = 0; i < limit; ++i) {
+            const auto& hit = scored[i];
+
+            result += hit.text;
+            result += "\n";
+            if (!hit.annotation.empty()) {
+                result += hit.annotation;
                 result += "\n";
-                const auto& ann = graph_.annotation(id);
-                if (!ann.empty()) {
-                    result += ann;
-                    result += "\n";
-                }
+            }
 
-                // Now activate: pull to center + increment access count
-                langevin::LangevinStepper::activate(graph_.state(id),
-                                                     current_time());
+            if (hit.is_archived) {
+                // Reactivate: re-insert into graph at Poincaré center
+                auto& snap = archived_hits[hit.archived_idx];
+                snap.pos_x = 0.0f;
+                snap.pos_y = 0.0f;
+                snap.access_count += 1;
+                snap.last_access = current_time();
+                graph_.insert_from_snapshot(snap);
+                persist_.reactivate_node(snap.id);
+            } else {
+                // Activate in-memory node: pull to center
+                langevin::LangevinStepper::activate(
+                    graph_.state(hit.active_id), current_time());
             }
         }
     }
