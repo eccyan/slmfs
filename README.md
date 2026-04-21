@@ -205,6 +205,80 @@ future sessions, write it to active.md.
 
 This works because Claude Code can run `cat` and `echo` — the FUSE layer transparently handles embedding, retrieval, and the Langevin physics underneath.
 
+#### Automatic Memory Loading via Hook
+
+For a fully hands-free experience, add a `SessionStart` hook to your `~/.claude/settings.json`. This automatically injects active SLMFS memories into every new Claude Code session — no manual `cat` needed:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CONTENT=$(cat ~/.agent_memory/active.md 2>/dev/null | head -100); if [ -n \"$CONTENT\" ]; then jq -n --arg ctx \"$CONTENT\" '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":(\"## Active SLMFS Memories\\n\\n\" + $ctx)}}'; fi",
+            "timeout": 5,
+            "statusMessage": "Loading SLMFS memories..."
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+> **Requires:** `jq` (`brew install jq` / `apt install jq`)
+
+When the hook fires, Claude sees the current working memory as part of its initial context — giving it continuity across sessions without any manual steps.
+
+### Observing the Brain
+
+The `analyze` command provides a real-time dashboard of the Poincaré disk's state:
+
+```bash
+python -m slmfs analyze
+```
+
+```
+──────────────────────────────────────────────────
+  Node Population
+──────────────────────────────────────────────────
+  Total nodes:    110
+  Active:         20
+  Archived:       90
+
+──────────────────────────────────────────────────
+  Spatial Distribution (Langevin Drift)
+──────────────────────────────────────────────────
+  Working Memory  (r < 0.30):     20  nodes
+  Drifting        (r < 0.80):      0  nodes
+  Nearing Archive (r < 0.95):      0  nodes
+  Beyond boundary (r >= 0.95):     0  nodes
+
+──────────────────────────────────────────────────
+  Poincare Disk Map (Active Nodes)
+──────────────────────────────────────────────────
+          .........
+         ....   ....
+       ...         ...
+      ..             ..
+     ..               ..
+    .         *         .
+     ..               ..
+      ..             ..
+       ...         ...
+         ....   ....
+          .........
+```
+
+Metrics include:
+- **Node Population** — Total, active, and archived node counts
+- **Spatial Distribution** — How nodes cluster across Langevin drift zones (working memory → drifting → nearing archive)
+- **Fisher-Rao Certainty** — Average access count and sigma (lower sigma = higher confidence)
+- **Cohomology Frictions** — Nodes where topological contradictions were detected and resolved
+- **ASCII Disk Map** — 2D scatter plot of active node positions on the Poincaré disk
+
 ### Multi-Project Isolation
 
 Each project can run its own independent "brain" by specifying unique file paths:
