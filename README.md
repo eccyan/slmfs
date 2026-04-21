@@ -125,7 +125,7 @@ cd python && pip install -e ".[dev]"
 ### Running Tests
 
 ```bash
-# C++ tests (133 tests)
+# C++ tests (140 tests)
 cd build && ctest --output-on-failure
 
 # Python tests (20 tests)
@@ -142,7 +142,7 @@ cd python && pytest ../tests/python/ -v
 This will:
 1. Install dependencies (cmake, sqlite3, FUSE-T on macOS / libfuse3 on Linux)
 2. Build the C++23 engine
-3. Run all tests (133 C++ + 20 Python)
+3. Run all tests (140 C++ + 20 Python)
 4. Install the engine binary to `~/.local/bin/`
 5. Register background services (launchd on macOS, systemd on Linux)
 
@@ -152,8 +152,10 @@ This will:
 # 1. Migrate existing notes into the Poincare memory space
 python -m slmfs init --db-path=~/.slmfs/memory.db ~/MEMORY.md ~/notes/*.md
 
-# 2. Start the C++ engine daemon
-slmfs_engine --db-path=~/.slmfs/memory.db
+# 2. Start the C++ engine daemon (physics params are tunable via CLI)
+slmfs_engine --db-path=~/.slmfs/memory.db \
+  --lambda-decay=5e-6 --noise-scale=2e-4 \
+  --thermal-kick-radius=0.01 --archive-threshold=0.95
 
 # 3. Mount the FUSE filesystem
 python -m slmfs fuse --mount=~/.agent_memory
@@ -211,6 +213,12 @@ For a fully hands-free experience, add a `SessionStart` hook to your `~/.claude/
 
 ```json
 {
+  "permissions": {
+    "allow": [
+      "Bash(cat ~/.agent_memory:*)",
+      "Read(//Users/YOU/.agent_memory/**)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -224,14 +232,16 @@ For a fully hands-free experience, add a `SessionStart` hook to your `~/.claude/
         ]
       }
     ],
-    "Stop": [
+    "PostToolUse": [
       {
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "COMMITS=$(git log --oneline --since=\"12 hours ago\" --no-merges 2>/dev/null | head -20); if [ -z \"$COMMITS\" ]; then exit 0; fi; BRANCH=$(git branch --show-current 2>/dev/null); REPO=$(basename \"$(git rev-parse --show-toplevel 2>/dev/null)\" 2>/dev/null); SUMMARY=\"Session in ${REPO} (${BRANCH}): ${COMMITS}\"; echo \"$SUMMARY\" > ~/.agent_memory/active.md; COUNT=$(echo \"$COMMITS\" | wc -l | tr -d \" \"); jq -n --arg msg \"Saved session summary to SLMFS ($COUNT commits)\" '{\"systemMessage\": $msg}'",
+            "if": "Bash(gh pr:*)",
+            "command": "COMMITS=$(git log --oneline --since=\"12 hours ago\" --no-merges 2>/dev/null | head -20); if [ -z \"$COMMITS\" ]; then exit 0; fi; BRANCH=$(git branch --show-current 2>/dev/null); REPO=$(basename \"$(git rev-parse --show-toplevel 2>/dev/null)\" 2>/dev/null); SUMMARY=\"Session in ${REPO} (${BRANCH}): ${COMMITS}\"; echo \"$SUMMARY\" > ~/.agent_memory/active.md; COUNT=$(echo \"$COMMITS\" | wc -l | tr -d ' '); jq -n --arg msg \"Wrote session summary to SLMFS ($COUNT commits)\" '{\"systemMessage\": $msg}'",
             "timeout": 5,
-            "statusMessage": "Saving learnings to SLMFS..."
+            "statusMessage": "Writing session to SLMFS..."
           }
         ]
       }
@@ -241,13 +251,15 @@ For a fully hands-free experience, add a `SessionStart` hook to your `~/.claude/
 ```
 
 > **Requires:** `jq` (`brew install jq` / `apt install jq`)
+>
+> Replace `YOU` in the Read permission with your macOS username.
 
 The two hooks form a complete memory loop:
 
 | Hook | When | What it does |
 |------|------|-------------|
 | `SessionStart` | Session opens | Reads `active.md` and injects it as context |
-| `Stop` | Session ends | Writes recent commits as a session summary to `active.md` |
+| `PostToolUse` | After `gh pr` commands | Writes recent commits as a session summary to `active.md` |
 
 This gives Claude continuity across sessions — it remembers what it did last time and picks up where it left off. The FUSE layer handles embedding and the Langevin physics ensures old memories naturally drift to the archive while recent work stays in focus.
 
@@ -297,6 +309,19 @@ Metrics include:
 - **Fisher-Rao Certainty** — Average access count and sigma (lower sigma = higher confidence)
 - **Cohomology Frictions** — Nodes where topological contradictions were detected and resolved
 - **ASCII Disk Map** — 2D scatter plot of active node positions on the Poincaré disk
+
+### Tuning Memory Retention
+
+The Langevin physics parameters control how fast memories drift toward the archive boundary. All are configurable via CLI flags — no recompilation needed:
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `--lambda-decay` | `5e-6` | Outward drift rate. Higher = faster forgetting |
+| `--noise-scale` | `2e-4` | Brownian noise intensity. Higher = more random drift |
+| `--thermal-kick-radius` | `0.01` | Initial offset on activation (avoids origin singularity) |
+| `--archive-threshold` | `0.95` | Poincaré disk radius at which nodes are archived |
+
+With the defaults, an unaccessed memory takes ~10 days to reach the archive boundary (r=0.95). Accessing a memory resets it to the disk center. Tune `--lambda-decay` to control the "forgetfulness" of the agent's working memory.
 
 ### Multi-Project Isolation
 
