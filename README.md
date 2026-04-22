@@ -168,9 +168,16 @@ cat ~/.agent_memory/search/deployment_notes.md
 # 5. Bulk ingest a large reference document into the running engine
 python -m slmfs add reference_docs.md
 
-# 6. Observe the brain — statistical dashboard of Poincaré disk state
+# 6. Bulk ingest an entire docs folder (stop FUSE first — single producer lock)
+launchctl unload ~/Library/LaunchAgents/com.eccyan.slmfs-fuse.plist   # macOS
+python -m slmfs add ~/projects/my-app/docs/**/*.md
+launchctl load ~/Library/LaunchAgents/com.eccyan.slmfs-fuse.plist     # restart FUSE
+
+# 7. Observe the brain — statistical dashboard of Poincaré disk state
 python -m slmfs analyze
 ```
+
+> **Note:** `slmfs add` and the FUSE layer share a single-producer lock on the shared memory file. If FUSE is running, stop it first (`launchctl unload` on macOS / `systemctl --user stop slmfs-fuse` on Linux), run the ingestion, then restart FUSE.
 
 > **Note:** If you ran `install.sh`, steps 2-3 are already running as background services.
 
