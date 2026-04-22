@@ -216,7 +216,9 @@ For a fully hands-free experience, add a `SessionStart` hook to your `~/.claude/
   "permissions": {
     "allow": [
       "Bash(cat ~/.agent_memory:*)",
-      "Read(//Users/YOU/.agent_memory/**)"
+      "Bash(echo:*)",
+      "Read(//Users/YOU/.agent_memory/**)",
+      "Write(//Users/YOU/.agent_memory/**)"
     ]
   },
   "hooks": {
@@ -242,6 +244,13 @@ For a fully hands-free experience, add a `SessionStart` hook to your `~/.claude/
             "command": "COMMITS=$(git log --oneline --since=\"12 hours ago\" --no-merges 2>/dev/null | head -20); if [ -z \"$COMMITS\" ]; then exit 0; fi; BRANCH=$(git branch --show-current 2>/dev/null); REPO=$(basename \"$(git rev-parse --show-toplevel 2>/dev/null)\" 2>/dev/null); SUMMARY=\"Session in ${REPO} (${BRANCH}): ${COMMITS}\"; echo \"$SUMMARY\" > ~/.agent_memory/active.md; COUNT=$(echo \"$COMMITS\" | wc -l | tr -d ' '); jq -n --arg msg \"Wrote session summary to SLMFS ($COUNT commits)\" '{\"systemMessage\": $msg}'",
             "timeout": 5,
             "statusMessage": "Writing session to SLMFS..."
+          },
+          {
+            "type": "command",
+            "if": "Bash(git commit:*)",
+            "command": "CMD=$(jq -r '.tool_input.command' 2>/dev/null); MSG=$(echo \"$CMD\" | sed -n \"s/.*git commit.*-m.*[\\\"']\\(.*\\)[\\\"'].*/\\1/p\"); if [ -z \"$MSG\" ]; then exit 0; fi; if echo \"$MSG\" | grep -qiE '(spec|plan|design)'; then REPO=$(basename \"$(git rev-parse --show-toplevel 2>/dev/null)\" 2>/dev/null); BRANCH=$(git branch --show-current 2>/dev/null); FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | head -5 | tr '\\n' ', '); SUMMARY=\"Spec/plan committed in ${REPO} (${BRANCH}): ${MSG} | Files: ${FILES}\"; echo \"$SUMMARY\" > ~/.agent_memory/active.md; jq -n --arg msg \"Wrote spec/plan to SLMFS\" '{\"systemMessage\": $msg}'; fi",
+            "timeout": 5,
+            "statusMessage": "Checking for spec/plan commit..."
           }
         ]
       }
@@ -252,16 +261,17 @@ For a fully hands-free experience, add a `SessionStart` hook to your `~/.claude/
 
 > **Requires:** `jq` (`brew install jq` / `apt install jq`)
 >
-> Replace `YOU` in the Read permission with your macOS username.
+> Replace `YOU` in the Read/Write permissions with your macOS username.
 
-The two hooks form a complete memory loop:
+The hooks form a complete memory loop:
 
-| Hook | When | What it does |
-|------|------|-------------|
+| Hook | Trigger | What it does |
+|------|---------|-------------|
 | `SessionStart` | Session opens | Reads `active.md` and injects it as context |
 | `PostToolUse` | After `gh pr` commands | Writes recent commits as a session summary to `active.md` |
+| `PostToolUse` | After `git commit` with "spec", "plan", or "design" in message | Writes spec/plan details + file list to `active.md` |
 
-This gives Claude continuity across sessions — it remembers what it did last time and picks up where it left off. The FUSE layer handles embedding and the Langevin physics ensures old memories naturally drift to the archive while recent work stays in focus.
+This gives Claude continuity across sessions — it remembers what it did last time and picks up where it left off. Spec and plan commits are captured automatically, so the next session knows what was designed before implementation begins. The FUSE layer handles embedding and the Langevin physics ensures old memories naturally drift to the archive while recent work stays in focus.
 
 ### Observing the Brain
 
