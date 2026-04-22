@@ -32,38 +32,43 @@ def _fuse_plist() -> Path:
     return Path.home() / "Library/LaunchAgents" / _PLIST_NAME
 
 
-def _is_fuse_mounted(mount_point: str = "/.agent_memory") -> bool:
+def _is_fuse_mounted(mount_point: Path | None = None) -> bool:
     """Check if the FUSE mount is active."""
+    if mount_point is None:
+        mount_point = Path.home() / ".agent_memory"
+    target = str(mount_point.resolve())
     try:
         result = subprocess.run(
             ["mount"], capture_output=True, text=True, timeout=5,
         )
-        return mount_point in result.stdout
+        return target in result.stdout
     except Exception:
         return False
 
 
-def _wait_for_fuse_unmount(timeout: float = 10.0) -> bool:
+def _wait_for_fuse_unmount(mount_point: Path | None = None,
+                           timeout: float = 10.0) -> bool:
     """Poll until FUSE is no longer mounted."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not _is_fuse_mounted():
+        if not _is_fuse_mounted(mount_point):
             return True
         time.sleep(0.5)
     return False
 
 
-def _wait_for_fuse_mount(timeout: float = 10.0) -> bool:
+def _wait_for_fuse_mount(mount_point: Path | None = None,
+                         timeout: float = 10.0) -> bool:
     """Poll until FUSE is mounted."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if _is_fuse_mounted():
+        if _is_fuse_mounted(mount_point):
             return True
         time.sleep(0.5)
     return False
 
 
-def _stop_fuse() -> bool:
+def _stop_fuse(mount_point: Path | None = None) -> bool:
     """Stop the FUSE service. Returns True on success."""
     if platform.system() == "Darwin":
         plist = _fuse_plist()
@@ -77,7 +82,7 @@ def _stop_fuse() -> bool:
         if result.returncode != 0:
             print(f"  WARNING: launchctl unload failed: {result.stderr.strip()}")
             return False
-        if not _wait_for_fuse_unmount():
+        if not _wait_for_fuse_unmount(mount_point):
             print("  WARNING: FUSE did not unmount within timeout")
             return False
         return True
@@ -89,7 +94,7 @@ def _stop_fuse() -> bool:
         if result.returncode != 0:
             print(f"  WARNING: systemctl stop failed: {result.stderr.strip()}")
             return False
-        if not _wait_for_fuse_unmount():
+        if not _wait_for_fuse_unmount(mount_point):
             print("  WARNING: FUSE did not unmount within timeout")
             return False
         return True
@@ -98,7 +103,7 @@ def _stop_fuse() -> bool:
         return False
 
 
-def _start_fuse() -> bool:
+def _start_fuse(mount_point: Path | None = None) -> bool:
     """Restart the FUSE service. Returns True on success."""
     if platform.system() == "Darwin":
         plist = _fuse_plist()
@@ -112,7 +117,7 @@ def _start_fuse() -> bool:
         if result.returncode != 0:
             print(f"  WARNING: launchctl load failed: {result.stderr.strip()}")
             return False
-        if not _wait_for_fuse_mount():
+        if not _wait_for_fuse_mount(mount_point):
             print("  WARNING: FUSE did not mount within timeout")
             return False
         return True
@@ -124,7 +129,7 @@ def _start_fuse() -> bool:
         if result.returncode != 0:
             print(f"  WARNING: systemctl start failed: {result.stderr.strip()}")
             return False
-        if not _wait_for_fuse_mount():
+        if not _wait_for_fuse_mount(mount_point):
             print("  WARNING: FUSE did not mount within timeout")
             return False
         return True
@@ -199,10 +204,14 @@ def main():
         print("       python -m slmfs add --stop-fuse ~/docs/**/*.md")
         sys.exit(1)
 
+    # The default mount_point is relative (.agent_memory); the FUSE layer
+    # mounts it under $HOME, so resolve relative to home for mount checks.
+    mp = config.mount_point.expanduser()
+    mount_point = mp if mp.is_absolute() else (Path.home() / mp).resolve()
     fuse_stopped = False
     if stop_fuse:
         print("Stopping FUSE service...")
-        fuse_stopped = _stop_fuse()
+        fuse_stopped = _stop_fuse(mount_point)
 
     try:
         print(f"Connecting to engine via shm: {config.shm_path}")
@@ -223,7 +232,7 @@ def main():
             # Always attempt restart when --stop-fuse was requested,
             # even if _stop_fuse failed (best-effort recovery).
             print("Restarting FUSE service...")
-            if not _start_fuse():
+            if not _start_fuse(mount_point):
                 print("  ERROR: FUSE service failed to restart. "
                       "Run manually: launchctl load ~/Library/LaunchAgents/"
                       f"{_PLIST_NAME}")
