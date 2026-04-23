@@ -8,8 +8,6 @@ import math
 import os
 import sqlite3
 import struct
-from typing import Optional
-
 import numpy as np
 from mcp.server.fastmcp import FastMCP
 
