@@ -16,7 +16,7 @@ struct DiskPosition {
 /// State of a memory node on the Poincaré disk.
 struct NodeState {
     DiskPosition pos;
-    double last_access_time{0.0};
+    uint64_t last_access_tick{0};
     uint32_t access_count{0};
 };
 

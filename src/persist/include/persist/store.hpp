@@ -17,7 +17,9 @@ public:
         const metric::FisherRaoMetric& metric,
         uint32_t k
     ) = 0;
-    virtual void reactivate_node(uint32_t id, float pos_x, float pos_y) = 0;
+    virtual void reactivate_node(uint32_t id, float pos_x, float pos_y,
+                                 uint64_t tick) = 0;
+    virtual uint64_t max_tick() = 0;
 };
 
 } // namespace slm::persist

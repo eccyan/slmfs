@@ -7,7 +7,7 @@ namespace slm::langevin {
 LangevinStepper::LangevinStepper(Config config)
     : config_(config) {}
 
-void LangevinStepper::activate(NodeState& node, double current_time,
+void LangevinStepper::activate(NodeState& node, uint64_t current_tick,
                                 std::mt19937& rng) const {
     // Small thermal kick at random angle so the node has a drift direction
     // and doesn't get stuck at the origin singularity.
@@ -16,17 +16,23 @@ void LangevinStepper::activate(NodeState& node, double current_time,
     float theta = angle_dist(rng);
     node.pos = {config_.thermal_kick_radius * std::cos(theta),
                 config_.thermal_kick_radius * std::sin(theta)};
-    node.last_access_time = current_time;
+    node.last_access_tick = current_tick;
     node.access_count += 1;
 }
 
 std::vector<uint32_t> LangevinStepper::step(
     std::span<NodeState> nodes,
-    double current_time,
+    uint64_t current_tick,
+    uint64_t delta_ticks,
     std::mt19937& rng
 ) const {
     std::vector<uint32_t> archived;
     std::normal_distribution<float> noise_dist(0.0f, 1.0f);
+
+    // Euler-Maruyama scaling by elapsed cognitive ticks
+    float dt_eff = config_.dt * static_cast<float>(delta_ticks);
+    float noise_eff = config_.noise_scale
+                    * std::sqrt(static_cast<float>(delta_ticks));
 
     for (uint32_t i = 0; i < nodes.size(); ++i) {
         auto& node = nodes[i];
@@ -39,21 +45,18 @@ std::vector<uint32_t> LangevinStepper::step(
 
         float g_inv = inverse_metric(node.pos);
 
-        // Time since last access, converted to days so that drift
-        // accumulates over a human-scale working-memory lifespan
-        // rather than racing to the boundary in seconds.
-        float age_days = static_cast<float>(
-            current_time - node.last_access_time) / SECONDS_PER_DAY;
+        // Age in cognitive ticks since last access
+        float age_ticks = static_cast<float>(
+            current_tick - node.last_access_tick);
 
-        // Gradient of U(p) = -lambda * age_days * r
-        // nabla_U = -lambda * age_days * (p / r)  (radial gradient)
-        // Drift = -g_inv * nabla_U * dt = g_inv * lambda * age_days * (p/r) * dt
-        float drift_mag = g_inv * config_.lambda_decay * age_days * config_.dt / r;
+        // Gradient of U(p) = -lambda * age_ticks * r
+        // Drift = g_inv * lambda * age_ticks * (p/r) * dt_eff
+        float drift_mag = g_inv * config_.lambda_decay * age_ticks * dt_eff / r;
         float dx_drift = drift_mag * node.pos.x;
         float dy_drift = drift_mag * node.pos.y;
 
-        // Noise: sqrt(2 * g_inv * dt) * xi
-        float noise_mag = config_.noise_scale * std::sqrt(2.0f * g_inv * config_.dt);
+        // Noise: sqrt(2 * g_inv * dt_eff) * noise_eff * xi
+        float noise_mag = noise_eff * std::sqrt(2.0f * g_inv * dt_eff);
         float dx_noise = noise_mag * noise_dist(rng);
         float dy_noise = noise_mag * noise_dist(rng);
 

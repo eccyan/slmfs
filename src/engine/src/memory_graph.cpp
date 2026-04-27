@@ -101,7 +101,7 @@ MemoryGraph::NodeSnapshot MemoryGraph::snapshot(uint32_t id) const {
         .access_count = states_[idx].access_count,
         .pos_x = states_[idx].pos.x,
         .pos_y = states_[idx].pos.y,
-        .last_access = states_[idx].last_access_time,
+        .last_access_tick = states_[idx].last_access_tick,
         .annotation = annotations_[idx],
     };
 }
@@ -111,7 +111,7 @@ void MemoryGraph::insert_from_snapshot(const NodeSnapshot& snap) {
     ids_.push_back(snap.id);
     states_.push_back(langevin::NodeState{
         .pos = {snap.pos_x, snap.pos_y},
-        .last_access_time = snap.last_access,
+        .last_access_tick = snap.last_access_tick,
         .access_count = snap.access_count,
     });
     mus_.push_back(snap.mu);

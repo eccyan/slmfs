@@ -48,7 +48,7 @@ public:
         uint32_t access_count;
         float pos_x;
         float pos_y;
-        double last_access;
+        uint64_t last_access_tick;
         std::string annotation;
     };
 

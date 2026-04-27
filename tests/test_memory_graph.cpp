@@ -17,7 +17,7 @@ struct GraphFixture : public ::testing::Test {
         std::vector<float> sigma = {1.0f, 1.0f, 1.0f};
         NodeState state{};
         state.pos = {x, y};
-        state.last_access_time = 0.0;
+        state.last_access_tick = 0;
         state.access_count = 0;
         return graph.insert(std::move(mu), std::move(sigma), text,
                             parent_id, depth, state);

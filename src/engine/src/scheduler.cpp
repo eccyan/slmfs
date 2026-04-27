@@ -23,15 +23,17 @@ Scheduler::Scheduler(
       sheaf_(sheaf), langevin_(langevin), persist_(persist), config_(config)
 {}
 
-double Scheduler::current_time() const {
-    auto now = std::chrono::steady_clock::now();
-    return std::chrono::duration<double>(now - start_time_).count();
-}
-
 void Scheduler::run() {
     stop_requested_.store(false, std::memory_order_relaxed);
+
+    // Restart safety: resume cognitive tick from the highest persisted value
+    // to prevent unsigned underflow in age calculations.
+    uint64_t max_tick = persist_.max_tick();
+    global_tick_.store(max_tick, std::memory_order_relaxed);
+    last_tier3_tick_ = max_tick;
+
     start_time_ = std::chrono::steady_clock::now();
-    last_tier3_tick_ = start_time_;
+    last_tier3_wall_ = start_time_;
     last_checkpoint_ = start_time_;
 
     while (!stop_requested_.load(std::memory_order_acquire)) {
@@ -44,9 +46,9 @@ void Scheduler::run() {
         }
 
         now = std::chrono::steady_clock::now();
-        if (now - last_tier3_tick_ >= config_.tier3_tick_interval) {
+        if (now - last_tier3_wall_ >= config_.tier3_tick_interval) {
             process_tier3();
-            last_tier3_tick_ = now;
+            last_tier3_wall_ = now;
         }
 
         now = std::chrono::steady_clock::now();
@@ -77,14 +79,15 @@ void Scheduler::process_tier1() {
             slab_.release(slab_idx);
             break;
         case slab::CMD_READ:
-            // Search read: top-k + activate. Client owns slab until DONE.
             handle_read(slab_idx);
             break;
         case slab::CMD_READ_ACTIVE:
-            // Passive read: active nodes only, no mutation. Client owns slab.
             handle_read_active(slab_idx);
             break;
         }
+
+        // Advance cognitive time after every command
+        global_tick_.fetch_add(1, std::memory_order_relaxed);
     }
 }
 
@@ -104,10 +107,11 @@ void Scheduler::handle_write_commit(uint32_t slab_idx) {
     std::vector<float> sigma(hdr.vector_dim, metric::SIGMA_MAX);
 
     langevin::NodeState state{};
-    state.last_access_time = current_time();
+    uint64_t tick = global_tick_.load(std::memory_order_relaxed);
+    state.last_access_tick = tick;
     state.access_count = 0;
     // Thermal kick so the node has a drift direction from birth.
-    langevin_.activate(state, state.last_access_time, rng_);
+    langevin_.activate(state, tick, rng_);
 
     auto node_id = graph_.insert(
         std::move(mu), std::move(sigma), std::move(text),
@@ -221,19 +225,20 @@ void Scheduler::handle_read(uint32_t slab_idx) {
             if (hit.is_archived) {
                 // Reactivate: re-insert into graph with thermal kick
                 auto& snap = archived_hits[hit.archived_idx];
-                // Use a temporary NodeState for the kick, then copy coords
+                uint64_t tick = global_tick_.load(std::memory_order_relaxed);
                 langevin::NodeState tmp{};
-                langevin_.activate(tmp, current_time(), rng_);
+                langevin_.activate(tmp, tick, rng_);
                 snap.pos_x = tmp.pos.x;
                 snap.pos_y = tmp.pos.y;
                 snap.access_count += 1;
-                snap.last_access = current_time();
+                snap.last_access_tick = tick;
                 graph_.insert_from_snapshot(snap);
-                persist_.reactivate_node(snap.id, snap.pos_x, snap.pos_y);
+                persist_.reactivate_node(snap.id, snap.pos_x, snap.pos_y, tick);
             } else {
                 // Activate in-memory node: pull to center with thermal kick
+                uint64_t tick = global_tick_.load(std::memory_order_relaxed);
                 langevin_.activate(
-                    graph_.state(hit.active_id), current_time(), rng_);
+                    graph_.state(hit.active_id), tick, rng_);
             }
         }
     }
@@ -327,7 +332,12 @@ void Scheduler::process_tier2() {
 }
 
 void Scheduler::process_tier3() {
-    auto archived = langevin_.step(graph_.all_states(), current_time(), rng_);
+    uint64_t current = global_tick_.load(std::memory_order_relaxed);
+    uint64_t delta = current - last_tier3_tick_;
+    if (delta == 0) return;  // brain is asleep — skip physics
+    last_tier3_tick_ = current;
+
+    auto archived = langevin_.step(graph_.all_states(), current, delta, rng_);
 
     std::vector<uint32_t> archive_ids;
     auto all_ids = graph_.all_ids();

@@ -41,12 +41,12 @@ TEST_F(PersistFixture, CheckpointAndLoad) {
 
     std::vector<float> mu1 = {1.0f, 0.0f, 0.0f};
     std::vector<float> sigma1 = {0.5f, 0.5f, 0.5f};
-    NodeState state1{.pos = {0.3f, 0.4f}, .last_access_time = 100.0, .access_count = 5};
+    NodeState state1{.pos = {0.3f, 0.4f}, .last_access_tick = 100, .access_count = 5};
     auto id1 = graph.insert(mu1, sigma1, "first node", 0, 0, state1);
 
     std::vector<float> mu2 = {0.0f, 1.0f, 0.0f};
     std::vector<float> sigma2 = {1.0f, 1.0f, 1.0f};
-    NodeState state2{.pos = {0.1f, 0.0f}, .last_access_time = 200.0, .access_count = 2};
+    NodeState state2{.pos = {0.1f, 0.0f}, .last_access_tick = 200, .access_count = 2};
     auto id2 = graph.insert(mu2, sigma2, "second node", id1, 1, state2);
 
     graph.set_annotation(id2, "<!-- test annotation -->");
@@ -69,7 +69,7 @@ TEST_F(PersistFixture, CheckpointAndLoad) {
     EXPECT_EQ(loaded.depth(id1), 0u);
     EXPECT_NEAR(loaded.state(id1).pos.x, 0.3f, 1e-5f);
     EXPECT_NEAR(loaded.state(id1).pos.y, 0.4f, 1e-5f);
-    EXPECT_DOUBLE_EQ(loaded.state(id1).last_access_time, 100.0);
+    EXPECT_EQ(loaded.state(id1).last_access_tick, 100u);
     EXPECT_EQ(loaded.state(id1).access_count, 5u);
 
     auto loaded_mu1 = loaded.mu(id1);
@@ -157,20 +157,20 @@ TEST_F(PersistFixture, RoundTripWithSceneGraph) {
     std::vector<float> mu_root = {1.0f, 0.0f, 0.0f, 0.0f};
     std::vector<float> sigma = {1.0f, 1.0f, 1.0f, 1.0f};
     auto root = graph.insert(mu_root, sigma, "Project Overview", 0, 0,
-                              NodeState{.pos = {0.0f, 0.0f}, .last_access_time = 0.0});
+                              NodeState{.pos = {0.0f, 0.0f}, .last_access_tick = 0});
 
     std::vector<float> mu_h1 = {0.0f, 1.0f, 0.0f, 0.0f};
     auto h1 = graph.insert(mu_h1, sigma, "## Architecture", root, 1,
-                            NodeState{.pos = {0.1f, 0.0f}, .last_access_time = 10.0});
+                            NodeState{.pos = {0.1f, 0.0f}, .last_access_tick = 10});
 
     std::vector<float> mu_h2a = {0.0f, 0.0f, 1.0f, 0.0f};
     auto h2a = graph.insert(mu_h2a, sigma, "### Frontend", h1, 2,
-                             NodeState{.pos = {0.3f, 0.1f}, .last_access_time = 20.0,
+                             NodeState{.pos = {0.3f, 0.1f}, .last_access_tick = 20,
                                        .access_count = 3});
 
     std::vector<float> mu_h2b = {0.0f, 0.0f, 0.0f, 1.0f};
     auto h2b = graph.insert(mu_h2b, sigma, "### Backend", h1, 2,
-                             NodeState{.pos = {0.4f, -0.1f}, .last_access_time = 30.0,
+                             NodeState{.pos = {0.4f, -0.1f}, .last_access_tick = 30,
                                        .access_count = 7});
 
     graph.set_annotation(h2b, "<!-- cohomology: superseded ... -->");
@@ -294,7 +294,7 @@ TEST_F(PersistFixture, ReactivateNodeRemovesFromArchive) {
     ASSERT_EQ(before.size(), 1u);
 
     // Reactivate it
-    store.reactivate_node(id, 0.01f, 0.0f);
+    store.reactivate_node(id, 0.01f, 0.0f, 100);
 
     // Verify it's gone from the archive
     auto after = store.retrieve_archived(query, metric, 10);

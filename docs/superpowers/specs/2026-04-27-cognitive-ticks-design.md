@@ -19,6 +19,8 @@ Replace wall-clock time with **cognitive ticks** — an event-driven counter tha
 
 The scheduler also tracks `uint64_t last_tier3_tick_{0}` to compute elapsed ticks between physics steps.
 
+**Restart safety:** On engine startup, the persistence layer queries `SELECT MAX(last_access_tick) FROM memory_nodes` and returns it via `Store::max_tick()`. Both `global_tick_` and `last_tier3_tick_` are initialized to this value before any nodes are loaded or physics runs. This prevents unsigned underflow in the age calculation (`current_tick - node.last_access_tick`) which would otherwise wrap to ~2^64 and instantly archive every loaded memory.
+
 ### 2. NodeState Changes
 
 ```cpp
@@ -81,11 +83,10 @@ void reactivate_node(uint32_t id, float pos_x, float pos_y, uint64_t tick);
 
 ### 6. Lambda Decay Calibration
 
-With ~200 interactions/day and a target of 7-14 days to archive:
-- Target: 1400–2800 ticks (200/day × 7–14 days)
-- Working from drift equation with `effective_dt = base_dt * delta_ticks`:
-  - `lambda_decay ≈ 1e-3` as starting point
-  - Tunable via `--lambda-decay` CLI flag
+With `dt=1.0` (dimensionless base step) and `lambda_decay=5e-6`:
+- Simulated archival at tick 3039 (from r=0.01 to r=0.95)
+- With ~200 interactions/day: ~15 days to archive
+- Tunable via `--lambda-decay` CLI flag
 
 ### 7. Unchanged Components
 
@@ -108,8 +109,8 @@ With ~200 interactions/day and a target of 7-14 days to archive:
 | `src/engine/src/scheduler.cpp` | Increment tick on commands, gate Tier 3 |
 | `src/engine/src/main.cpp` | Recalibrate default `lambda_decay` |
 | `src/engine/src/memory_graph.cpp` | Snapshot serialization uses tick |
-| `src/persist/include/persist/store.hpp` | Update `reactivate_node` signature |
-| `src/persist/src/sqlite_store.cpp` | `last_access_tick INTEGER`, bind as int64 |
+| `src/persist/include/persist/store.hpp` | Update `reactivate_node` signature, add `max_tick()` |
+| `src/persist/src/sqlite_store.cpp` | `last_access_tick INTEGER`, bind as int64, implement `max_tick()` |
 | `python/slmfs/mcp_server.py` | Read `last_access_tick` column |
 | `tests/test_langevin.cpp` | All tests updated for tick-based API |
 | `tests/test_engine.cpp` | If exists, update for tick-based scheduler |
