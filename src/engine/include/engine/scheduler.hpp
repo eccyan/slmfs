@@ -59,8 +59,6 @@ private:
     void write_response(uint32_t slab_idx, std::span<std::byte> span,
                         const std::string& result);
 
-    double current_time() const;
-
     slab::SlabAllocator& slab_;
     slab::SPSCRingBuffer<uint32_t, 256>& queue_;
     MemoryGraph& graph_;
@@ -75,7 +73,11 @@ private:
 
     std::atomic<bool> stop_requested_{false};
 
-    std::chrono::steady_clock::time_point last_tier3_tick_;
+    /// Cognitive tick counter — incremented on every FUSE command.
+    std::atomic<uint64_t> global_tick_{0};
+    uint64_t last_tier3_tick_{0};
+
+    std::chrono::steady_clock::time_point last_tier3_wall_;
     std::chrono::steady_clock::time_point last_checkpoint_;
     std::chrono::steady_clock::time_point start_time_;
 };

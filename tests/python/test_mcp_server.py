@@ -67,7 +67,7 @@ def _create_test_db(db_path: Path, nodes=None):
             access_count INTEGER,
             pos_x REAL,
             pos_y REAL,
-            last_access REAL,
+            last_access_tick INTEGER,
             annotation TEXT,
             status INTEGER
         )
@@ -81,8 +81,8 @@ def _create_test_db(db_path: Path, nodes=None):
             """
             INSERT INTO memory_nodes
                 (id, parent_id, depth, text, mu, sigma, access_count,
-                 pos_x, pos_y, last_access, annotation, status)
-            VALUES (?, 0, 0, ?, ?, ?, ?, ?, ?, 0.0, NULL, ?)
+                 pos_x, pos_y, last_access_tick, annotation, status)
+            VALUES (?, 0, 0, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
             """,
             (
                 i + 1,

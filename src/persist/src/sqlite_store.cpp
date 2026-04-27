@@ -33,6 +33,25 @@ void SqliteStore::exec(const char* sql) {
 }
 
 void SqliteStore::create_schema() {
+    // Detect legacy schema (last_access REAL → last_access_tick INTEGER).
+    // If the old column exists, drop the table and recreate with new schema.
+    sqlite3_stmt* pragma = nullptr;
+    sqlite3_prepare_v2(db_, "PRAGMA table_info(memory_nodes)", -1, &pragma, nullptr);
+    bool has_legacy_column = false;
+    while (sqlite3_step(pragma) == SQLITE_ROW) {
+        const char* col = reinterpret_cast<const char*>(sqlite3_column_text(pragma, 1));
+        if (col && std::string(col) == "last_access") {
+            has_legacy_column = true;
+            break;
+        }
+    }
+    sqlite3_finalize(pragma);
+
+    if (has_legacy_column) {
+        exec("DROP TABLE IF EXISTS memory_nodes");
+        exec("DROP TABLE IF EXISTS edges");
+    }
+
     exec(R"(
         CREATE TABLE IF NOT EXISTS memory_nodes (
             id           INTEGER PRIMARY KEY,
@@ -44,7 +63,7 @@ void SqliteStore::create_schema() {
             access_count INTEGER NOT NULL DEFAULT 0,
             pos_x        REAL NOT NULL,
             pos_y        REAL NOT NULL,
-            last_access  REAL NOT NULL,
+            last_access_tick INTEGER NOT NULL DEFAULT 0,
             annotation   TEXT,
             status       INTEGER NOT NULL DEFAULT 0
         );
@@ -69,7 +88,7 @@ void SqliteStore::checkpoint(const engine::MemoryGraph& graph) {
     sqlite3_prepare_v2(db_,
         "INSERT INTO memory_nodes "
         "(id, parent_id, depth, text, mu, sigma, access_count, "
-        " pos_x, pos_y, last_access, annotation, status) "
+        " pos_x, pos_y, last_access_tick, annotation, status) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
         -1, &stmt, nullptr);
 
@@ -89,7 +108,7 @@ void SqliteStore::checkpoint(const engine::MemoryGraph& graph) {
         sqlite3_bind_int(stmt, 7, static_cast<int>(snap.access_count));
         sqlite3_bind_double(stmt, 8, snap.pos_x);
         sqlite3_bind_double(stmt, 9, snap.pos_y);
-        sqlite3_bind_double(stmt, 10, snap.last_access);
+        sqlite3_bind_int64(stmt, 10, static_cast<sqlite3_int64>(snap.last_access_tick));
         if (snap.annotation.empty()) {
             sqlite3_bind_null(stmt, 11);
         } else {
@@ -114,7 +133,7 @@ void SqliteStore::load(engine::MemoryGraph& graph) {
     sqlite3_stmt* stmt = nullptr;
     sqlite3_prepare_v2(db_,
         "SELECT id, parent_id, depth, text, mu, sigma, access_count, "
-        "       pos_x, pos_y, last_access, annotation "
+        "       pos_x, pos_y, last_access_tick, annotation "
         "FROM memory_nodes WHERE status = 0",
         -1, &stmt, nullptr);
 
@@ -140,7 +159,7 @@ void SqliteStore::load(engine::MemoryGraph& graph) {
         snap.access_count = static_cast<uint32_t>(sqlite3_column_int(stmt, 6));
         snap.pos_x = static_cast<float>(sqlite3_column_double(stmt, 7));
         snap.pos_y = static_cast<float>(sqlite3_column_double(stmt, 8));
-        snap.last_access = sqlite3_column_double(stmt, 9);
+        snap.last_access_tick = static_cast<uint64_t>(sqlite3_column_int64(stmt, 9));
 
         const char* ann = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 10));
         snap.annotation = ann ? ann : "";
@@ -156,7 +175,7 @@ void SqliteStore::archive_node(const engine::MemoryGraph::NodeSnapshot& snap) {
     sqlite3_prepare_v2(db_,
         "INSERT OR REPLACE INTO memory_nodes "
         "(id, parent_id, depth, text, mu, sigma, access_count, "
-        " pos_x, pos_y, last_access, annotation, status) "
+        " pos_x, pos_y, last_access_tick, annotation, status) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
         -1, &stmt, nullptr);
 
@@ -173,7 +192,7 @@ void SqliteStore::archive_node(const engine::MemoryGraph::NodeSnapshot& snap) {
     sqlite3_bind_int(stmt, 7, static_cast<int>(snap.access_count));
     sqlite3_bind_double(stmt, 8, snap.pos_x);
     sqlite3_bind_double(stmt, 9, snap.pos_y);
-    sqlite3_bind_double(stmt, 10, snap.last_access);
+    sqlite3_bind_int64(stmt, 10, static_cast<sqlite3_int64>(snap.last_access_tick));
     if (snap.annotation.empty()) {
         sqlite3_bind_null(stmt, 11);
     } else {
@@ -192,7 +211,7 @@ std::vector<engine::MemoryGraph::NodeSnapshot> SqliteStore::retrieve_archived(
     sqlite3_stmt* stmt = nullptr;
     sqlite3_prepare_v2(db_,
         "SELECT id, parent_id, depth, text, mu, sigma, access_count, "
-        "       pos_x, pos_y, last_access, annotation "
+        "       pos_x, pos_y, last_access_tick, annotation "
         "FROM memory_nodes WHERE status = 1",
         -1, &stmt, nullptr);
 
@@ -218,7 +237,7 @@ std::vector<engine::MemoryGraph::NodeSnapshot> SqliteStore::retrieve_archived(
         snap.access_count = static_cast<uint32_t>(sqlite3_column_int(stmt, 6));
         snap.pos_x        = static_cast<float>(sqlite3_column_double(stmt, 7));
         snap.pos_y        = static_cast<float>(sqlite3_column_double(stmt, 8));
-        snap.last_access  = sqlite3_column_double(stmt, 9);
+        snap.last_access_tick = static_cast<uint64_t>(sqlite3_column_int64(stmt, 9));
 
         const char* ann = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 10));
         snap.annotation = ann ? ann : "";
@@ -259,21 +278,34 @@ std::vector<engine::MemoryGraph::NodeSnapshot> SqliteStore::retrieve_archived(
     return result;
 }
 
-void SqliteStore::reactivate_node(uint32_t node_id, float pos_x, float pos_y) {
-    // Persist the thermal-kick coordinates so that if the engine crashes
-    // before the next checkpoint, the node isn't restored at origin (where
-    // LangevinStepper::step skips it, causing it to never drift/archive).
+void SqliteStore::reactivate_node(uint32_t node_id, float pos_x, float pos_y,
+                                   uint64_t tick) {
     sqlite3_stmt* stmt = nullptr;
     int rc = sqlite3_prepare_v2(db_,
-        "UPDATE memory_nodes SET status = 0, pos_x = ?, pos_y = ? "
-        "WHERE id = ? AND status = 1",
+        "UPDATE memory_nodes SET status = 0, pos_x = ?, pos_y = ?, "
+        "last_access_tick = ? WHERE id = ? AND status = 1",
         -1, &stmt, nullptr);
     if (rc != SQLITE_OK || !stmt) return;
     sqlite3_bind_double(stmt, 1, static_cast<double>(pos_x));
     sqlite3_bind_double(stmt, 2, static_cast<double>(pos_y));
-    sqlite3_bind_int(stmt, 3, static_cast<int>(node_id));
+    sqlite3_bind_int64(stmt, 3, static_cast<sqlite3_int64>(tick));
+    sqlite3_bind_int(stmt, 4, static_cast<int>(node_id));
     sqlite3_step(stmt);
     sqlite3_finalize(stmt);
+}
+
+uint64_t SqliteStore::max_tick() {
+    sqlite3_stmt* stmt = nullptr;
+    sqlite3_prepare_v2(db_,
+        "SELECT MAX(last_access_tick) FROM memory_nodes",
+        -1, &stmt, nullptr);
+
+    uint64_t result = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_type(stmt, 0) != SQLITE_NULL) {
+        result = static_cast<uint64_t>(sqlite3_column_int64(stmt, 0));
+    }
+    sqlite3_finalize(stmt);
+    return result;
 }
 
 } // namespace slm::persist

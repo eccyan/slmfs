@@ -29,7 +29,11 @@ public:
         uint32_t k) override;
 
     /// Remove an archived node (status=1) from the DB by id.
-    void reactivate_node(uint32_t node_id, float pos_x, float pos_y) override;
+    void reactivate_node(uint32_t node_id, float pos_x, float pos_y,
+                         uint64_t tick) override;
+
+    /// Return the highest last_access_tick across all nodes (for restart safety).
+    uint64_t max_tick() override;
 
 private:
     sqlite3* db_{nullptr};

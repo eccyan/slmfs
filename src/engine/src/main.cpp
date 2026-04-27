@@ -34,7 +34,7 @@ int main(int argc, char* argv[]) {
     uint32_t slab_size = 64 * 1024;
     uint32_t ctrl_size = 4096;
 
-    // Langevin SDE defaults (tuned for ~10 day archival lifecycle)
+    // Langevin SDE defaults (tuned for ~3000 tick archival lifecycle)
     float lambda_decay = 5.0e-6f;
     float noise_scale = 2.0e-4f;
     float thermal_kick_radius = 0.01f;
@@ -121,7 +121,7 @@ int main(int argc, char* argv[]) {
     slm::metric::FisherRaoMetric metric;
     slm::sheaf::CoboundaryOperator sheaf;
     slm::langevin::LangevinStepper langevin({
-        .dt = 5.0f,
+        .dt = 1.0f,
         .lambda_decay = lambda_decay,
         .noise_scale = noise_scale,
         .archive_threshold = archive_threshold,
